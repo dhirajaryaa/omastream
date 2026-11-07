@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# omastream installer — puts the CLI, shell plugin, icons and launchers in
-# place, then enables the plugin in the Omarchy shell.
+# omastream installer — app first: builds the Qt app, installs it with the
+# launcher entry and icon, then the CLI (omastream-cli) and the shell bubble
+# plugin. Everything lands in ~/.local — no root needed.
 #
-#   ./install.sh            copy files (default)
-#   ./install.sh --link     symlink everything instead (dev workflow)
+#   ./install.sh            build + install
+#   ./install.sh --link     symlink the CLI + plugin so dev edits apply live
 #   ./install.sh --uninstall
 set -u
 
@@ -11,12 +12,10 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LINK=0
 case "${1:-}" in
   --link) LINK=1 ;;
-  -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
   --uninstall)
-    rm -f "$HOME/.local/bin/omastream"
+    rm -f "$HOME/.local/bin/omastream" "$HOME/.local/bin/omastream-cli"
     rm -rf "$HOME/.config/omarchy/plugins/dhirajarya.omastream"
-    rm -f "$HOME/.local/share/applications/omastream-start.desktop"
-    rm -f "$HOME/.local/share/applications/omastream-stop.desktop"
+    rm -f "$HOME/.local/share/applications/omastream.desktop"
     rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/omastream.svg"
     for s in 512x512 256x256 128x128 64x64; do
       rm -f "$HOME/.local/share/icons/hicolor/$s/apps/omastream.png"
@@ -39,43 +38,52 @@ copy() {
 
 say() { printf '  %-46s %s\n' "$1" "$2"; }
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
-copy "$REPO/bin/omastream" "$HOME/.local/bin/omastream" 755;            say "CLI" "$HOME/.local/bin/omastream"
+need() { command -v "$1" >/dev/null 2>&1; }
 
-# ── Omarchy shell plugin ─────────────────────────────────────────────────────
-PLUGIN_SRC="$REPO/plugin"
-PLUGIN_DST="$HOME/.config/omarchy/plugins/dhirajarya.omastream"
-mkdir -p "$PLUGIN_DST"
-for f in manifest.json Service.qml CameraBubble.qml BarWidget.qml; do
-  copy "$PLUGIN_SRC/$f" "$PLUGIN_DST/$f"
-done
-say "shell plugin" "$PLUGIN_DST"
+# ── legacy cleanup: the old start/stop launcher scripts are replaced by the ──
+# ── one window; the name omastream now belongs to the app, the CLI is     ────
+# ── omastream-cli.                                                        ────
+rm -f "$HOME/.local/share/applications/omastream-start.desktop"
+rm -f "$HOME/.local/share/applications/omastream-stop.desktop"
 
-# ── icons + launchers ────────────────────────────────────────────────────────
+# ── the app (launcher: "Omastream", Super + Space) ───────────────────────────
+if need qmake6 && need g++ && need make; then
+  "$REPO/bin/build" >/dev/null 2>&1 || { echo "app build failed — run $REPO/bin/build for the full output" >&2; exit 1; }
+  copy "$REPO/build/omastream" "$HOME/.local/bin/omastream" 755
+  say "app" "$HOME/.local/bin/omastream"
+else
+  echo "build tools missing — install qmake6, g++, make, then re-run" >&2
+  exit 1
+fi
+
+copy "$REPO/pkgbuild/omastream.desktop" "$HOME/.local/share/applications/omastream.desktop"
+copy "$REPO/pkgbuild/omastream.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/omastream.svg"
 ICON_BASE="$HOME/.local/share/icons/hicolor"
-copy "$REPO/assets/omastream.svg" "$ICON_BASE/scalable/apps/omastream.svg"
 for size in 512x512 256x256 128x128 64x64; do
   copy "$REPO/assets/icons/$size/apps/omastream.png" "$ICON_BASE/$size/apps/omastream.png"
 done
-command -v gtk-update-icon-cache >/dev/null 2>&1 && \
-  gtk-update-icon-cache -qf "$ICON_BASE" 2>/dev/null || true
-say "icons" "$ICON_BASE (4 sizes + svg)"
+need gtk-update-icon-cache && gtk-update-icon-cache -qf "$ICON_BASE" 2>/dev/null || true
+need update-desktop-database && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+say "launcher + icon" "$HOME/.local/share/applications/omastream.desktop"
 
-for entry in omastream-start omastream-stop; do
-  copy "$REPO/assets/$entry.desktop" "$HOME/.local/share/applications/$entry.desktop"
+# ── the engine CLI ───────────────────────────────────────────────────────────
+copy "$REPO/cli/omastream" "$HOME/.local/bin/omastream-cli" 755
+say "CLI" "$HOME/.local/bin/omastream-cli"
+
+# ── the shell bubble plugin (optional overlay look) ──────────────────────────
+PLUGIN_DST="$HOME/.config/omarchy/plugins/dhirajarya.omastream"
+mkdir -p "$PLUGIN_DST"
+for f in manifest.json Service.qml CameraBubble.qml BarWidget.qml; do
+  copy "$REPO/plugin/$f" "$PLUGIN_DST/$f"
 done
-say "launchers" "start + stop desktop entries"
-
-# ── enable the plugin in the shell ───────────────────────────────────────────
-if command -v omarchy >/dev/null 2>&1; then
+if need omarchy; then
   omarchy plugin enable dhirajarya.omastream right >/dev/null 2>&1 \
-    && say "plugin enabled" "right section of the bar" \
-    || say "plugin" "not enabled automatically — run: omarchy plugin enable dhirajarya.omastream right"
+    && say "shell plugins" "camera bubble + LIVE bar badge enabled" \
+    || say "shell plugins" "copied — enable with: omarchy plugin enable dhirajarya.omastream right"
 fi
 
 echo
 echo "done. next:"
-echo "  1. omastream config stream-key   # paste your YouTube stream key"
-echo "  2. omarchy restart shell         # load the plugin (bubble + LIVE badge)"
-echo "  3. omastream test                # 8 s local dry run, no YouTube needed"
-echo "  4. omastream start               # go live"
+echo "  1. open Omastream from the launcher, paste your stream key, press Space"
+echo "  2. GPU encode on pre-Haswell Intel: sudo pacman -S libva-intel-driver libva-utils"
+echo "     (or start with --cpu-fallback from the CLI)"
