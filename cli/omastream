@@ -75,7 +75,9 @@ state_unlock() { flock -u 9; exec 9>&-; }
 state_json() { [[ -s $STATE_FILE ]] && cat "$STATE_FILE" 2>/dev/null || echo "{}"; }
 state_write() { # writes full object; caller holds the lock
   local tmp="$STATE_FILE.tmp.$$"
-  printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$STATE_FILE"
+  printf '%s\n' "$1" > "$tmp"
+  cat "$tmp" > "$STATE_FILE"
+  rm -f "$tmp"
 }
 state_merge() { # state_merge <partial-json>
   local merged
@@ -287,13 +289,14 @@ cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
   need "$GSR_BIN"; need "$GSR_CLI"; need jq
 
   local camflag="" file_out="" cpu_fallback
-  cpu_fallback="$(cfg_bool CPU_FALLBACK false)"
+  cpu_fallback="$(cfg_bool CPU_FALLBACK true)"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --cam)          camflag="${2:-}"; shift 2 ;;
-      --file)         file_out="${2:-}"; shift 2 ;;
-      --cpu-fallback) cpu_fallback=true; shift ;;
-      *)              die "unknown start option: $1" ;;
+      --cam)             camflag="${2:-}"; shift 2 ;;
+      --file)            file_out="${2:-}"; shift 2 ;;
+      --cpu-fallback)    cpu_fallback=true; shift ;;
+      --no-cpu-fallback) cpu_fallback=false; shift ;;
+      *)                 die "unknown start option: $1" ;;
     esac
   done
 
@@ -405,7 +408,7 @@ local check:  omastream-cli test"
     die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
   fi
 
-  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\"}"
+  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"lastError\":null,\"stopRequested\":false}"
   log "running: pid=$pid mode=$mode"
 
   # watchdog — flips state the moment the recorder dies, whatever the cause
@@ -421,6 +424,8 @@ cmd_stop() {
   local pid handled=false i
   pid="$(state_get '.pid' 0)"
 
+  # tell the watchdog a stop is on purpose before touching the process
+  [[ $pid =~ ^[0-9]+$ ]] && [[ $pid -gt 0 ]] && state_merge '{"stopRequested":true}'
   if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" stop >/dev/null 2>&1; then
     handled=true
     for ((i = 0; i < 100 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
@@ -447,7 +452,7 @@ cmd_stop() {
     die "nothing to stop"
   fi
 
-  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms)}"
+  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null}"
   rm -rf "$SOCK_DIR" 2>/dev/null || true
   log "stopped"
   echo "stopped"
@@ -668,9 +673,9 @@ cmd_config() {
       local value allowed
       key="${1:-}"; value="${2:-}"
       # app-facing settings; keep this list to what gpu-screen-recorder can use
-      allowed="|STREAM_KEY|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|"
+      allowed="|STREAM_KEY|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
       [[ $value != *[\"\'$'\n'\\]* ]] || die "invalid value for $key"
-      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT"
+      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
       create_config
       if grep -q "^${key}=" "$CONFIG_FILE"; then
         sed -i "s#^${key}=.*#${key}='$value'#" "$CONFIG_FILE"
@@ -678,7 +683,11 @@ cmd_config() {
         printf "\n%s='%s'\n" "$key" "$value" >> "$CONFIG_FILE"
       fi
       chmod 600 "$CONFIG_FILE"
-      echo "$key=$value saved" ;;
+      if [[ $key == STREAM_KEY ]]; then
+        echo "STREAM_KEY saved (kept private in $CONFIG_FILE)"
+      else
+        echo "$key=$value saved"
+      fi ;;
     print)
       [[ -r $CONFIG_FILE ]] || die "no config yet — run: omastream-cli config"
       sed -E 's#^(STREAM_KEY=).*#\1<redacted>#' "$CONFIG_FILE" ;;
@@ -687,14 +696,44 @@ cmd_config() {
 }
 
 # ── internal watchdog ───────────────────────────────────────────────────────
+# Waits out the recorder's death; when it dies without a stop being asked,
+# the reason goes into state.json so the app can say it out loud, not hide.
 __monitor() {
-  local pid="${1:-0}"
+  local pid="${1:-0}" reason
   while gsr_pid_alive "$pid"; do sleep 1; done
-  if [[ "$(state_get '.streaming' false)" == "true" ]]; then
-    state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms)}"
-    rm -rf "$SOCK_DIR" 2>/dev/null || true
-    log "recorder exited unexpectedly; state cleared"
+  [[ "$(state_get '.streaming' false)" == "true" ]] || return 0
+  if [[ "$(state_get '.stopRequested' false)" == "true" ]]; then
+    # a graceful stop owns its own state_write in cmd_stop
+    return 0
   fi
+  rm -rf "$SOCK_DIR" 2>/dev/null || true
+  reason="$(recorder_fail_line)"
+  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"lastError\":\"$(json_escape "$reason")\",\"stopRequested\":false}"
+  log "recorder exited unexpectedly; reason saved for the app: $reason"
+}
+
+# The last gsr complaint lines from the log — human words, not a stack dump.
+# The last gsr complaint from the log — human words, not a stack dump.
+# Only the tail: errors from previous runs must not bleed into this one.
+recorder_fail_line() {
+  local hit
+  hit="$(tail -n 60 "$LOG_FILE" 2>/dev/null | grep -aE 'gsr error|libva error|ffmpeg error' | grep -aviE 'query supported|get_supported|then make sure|possible that|corporate distros|You can test|manually install|flatpak version|fallback-cpu-encoding yes' | head -n 1 | tr -d '"\\' | cut -c1-260)"
+  if [[ -n $hit ]]; then
+    case "$hit" in
+      *"not supported by your hardware"*)
+        hit="$hit — fix: sudo pacman -S libva-intel-driver libva-utils (older Intel), or start with the CPU fallback" ;;
+    esac
+    printf '%s' "$hit"
+  else
+    printf 'recorder exited; check the log: %s' "$LOG_FILE"
+  fi
+}
+
+json_escape() { # tiny: output is a single line for state.json
+  local s="$1"
+  s="${s//\\/\\\\}" ; s="${s//\"/\\\"}"
+  s="${s//$'\n'/ }" ; s="${s//$'\r'/ }" ; s="${s//$'\t'/ }"
+  printf '%s' "$s"
 }
 
 usage() {
