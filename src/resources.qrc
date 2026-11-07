@@ -2,5 +2,20 @@
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
+        <file alias="icons/play.svg">icons/play.svg</file>
+        <file alias="icons/stop.svg">icons/stop.svg</file>
+        <file alias="icons/key.svg">icons/key.svg</file>
+        <file alias="icons/camera.svg">icons/camera.svg</file>
+        <file alias="icons/microphone.svg">icons/microphone.svg</file>
+        <file alias="icons/speaker.svg">icons/speaker.svg</file>
+        <file alias="icons/chip.svg">icons/chip.svg</file>
+        <file alias="icons/speed.svg">icons/speed.svg</file>
+        <file alias="icons/mirror.svg">icons/mirror.svg</file>
+        <file alias="icons/gear.svg">icons/gear.svg</file>
+        <file alias="icons/refresh.svg">icons/refresh.svg</file>
+        <file alias="icons/close.svg">icons/close.svg</file>
+        <file alias="icons/eye.svg">icons/eye.svg</file>
+        <file alias="icons/folder.svg">icons/folder.svg</file>
+        <file alias="icons/aspect.svg">icons/aspect.svg</file>
     </qresource>
 </RCC>

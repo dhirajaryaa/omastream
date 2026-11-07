@@ -5,7 +5,7 @@ Stream your screen to YouTube Live from Omarchy — one window, GPU encode
 still works when you don't feel like clicking.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The Omastream window — status card with the go-live button, camera bubble controls and settings" width="620">
+  <img src="docs/screenshot.png" alt="The Omastream window — sleek omareel-style cards, concentric live button and camera bubble controls" width="360">
 </p>
 
 The app is the main surface: press **Space** to go live, press it again to

@@ -21,7 +21,6 @@ class Backend : public QObject {
     Q_PROPERTY(bool camFlip READ camFlip NOTIFY stateChanged)
     Q_PROPERTY(bool starting READ starting NOTIFY busyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
-
     Q_PROPERTY(QString streamKey READ streamKey NOTIFY configChanged)
     Q_PROPERTY(QString audioSystem READ audioSystem NOTIFY configChanged)
     Q_PROPERTY(QString audioMic READ audioMic NOTIFY configChanged)
@@ -29,6 +28,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString videoCodec READ videoCodec NOTIFY configChanged)
     Q_PROPERTY(int bitrate READ bitrate NOTIFY configChanged)
     Q_PROPERTY(bool camOnStart READ camOnStart NOTIFY configChanged)
+    Q_PROPERTY(bool cpuFallback READ cpuFallback NOTIFY configChanged)
     Q_PROPERTY(QVariantList systemOutputs READ systemOutputs NOTIFY audioDevicesChanged)
     Q_PROPERTY(QVariantList microphones READ microphones NOTIFY audioDevicesChanged)
 
@@ -44,7 +44,12 @@ public:
     QString camShape() const { return m_camShape; }
     bool camFlip() const { return m_camFlip; }
     bool starting() const { return m_starting; }
-    QString lastError() const { return m_lastError; }
+    // What the user reads when something goes wrong: a command's own stderr
+    // leads; the recorder's watchdog reason (written to state.json by the CLI)
+    // follows. One honest line, no stack dumps.
+    QString lastError() const {
+        return m_commandError.isEmpty() ? m_stateError : m_commandError;
+    }
 
     QString streamKey() const { return m_config.value("STREAM_KEY").toString(); }
     QString audioSystem() const { return m_config.value("AUDIO_SYSTEM", "auto").toString(); }
@@ -53,6 +58,7 @@ public:
     QString videoCodec() const { return m_config.value("VIDEO_CODEC", "h264").toString(); }
     int bitrate() const { return m_config.value("VIDEO_BITRATE", "4500").toString().toInt(); }
     bool camOnStart() const { return m_config.value("CAM_ON_START", "false").toString() == "true"; }
+    bool cpuFallback() const { return m_config.value("CPU_FALLBACK", "true").toString() != "false"; }
     QVariantList systemOutputs() const { return m_systemOutputs; }
     QVariantList microphones() const { return m_microphones; }
 
@@ -61,6 +67,7 @@ public:
     Q_INVOKABLE void stopStream();
     Q_INVOKABLE void startTest();
     Q_INVOKABLE void toggleCam();
+    Q_INVOKABLE void cycleCamShape();
     Q_INVOKABLE void setCamShape(const QString &shape);
     Q_INVOKABLE void setCamFlip(bool flip);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
@@ -95,7 +102,7 @@ private:
     long long m_startedAt = 0;
     QString m_elapsed, m_mode, m_output;
     bool m_camVisible = false, m_starting = false, m_camFlip = true;
-    QString m_camShape = "16:9", m_lastError;
+    QString m_camShape = "16:9", m_stateError, m_commandError;
     QVariantMap m_config;
     QVariantList m_systemOutputs, m_microphones;
     QProcess m_audioProbe;

@@ -182,7 +182,6 @@ void Backend::reloadState() {
     armWatch(m_statePath);
     applyState(parseJson(file.readAll()));
 }
-
 void Backend::applyState(const QJsonObject &state) {
     const bool streaming = state.value("streaming").toBool();
     const long long startedAt = static_cast<long long>(state.value("startedAt").toDouble());
@@ -206,21 +205,38 @@ void Backend::applyState(const QJsonObject &state) {
     if (cam.value("flip").isBool())
         m_camFlip = cam.value("flip").toBool();
 
+    // The recorder's watchdog speaks through state.json when it dies alone.
+    const QString reason = state.value("lastError").toString();
+    QString nextError;
+    if (!streaming && !reason.isEmpty())
+        nextError = reason;
+
     m_elapsed = streaming ? formatElapsed(m_startedAt, QDateTime::currentMSecsSinceEpoch()) : QString();
     m_starting = false;
-    if (stopped)
-        m_lastError.clear(); // a clean stop clears any stale complaint
+    if (nextError != m_stateError) {
+        m_stateError = nextError;
+        emit lastErrorChanged();
+    }
+    if (stopped && m_stateError.isEmpty() && !m_commandError.isEmpty()) {
+        m_commandError.clear(); // a clean stop clears any stale complaint
+        emit lastErrorChanged();
+    }
     emit stateChanged();
     emit busyChanged();
-    emit lastErrorChanged();
 }
 
 void Backend::reloadConfig() {
     QFile file(m_configPath);
     if (file.open(QIODevice::ReadOnly)) {
-        m_config = parseConfig(file.readAll());
+        const QVariantMap fresh = parseConfig(file.readAll());
+        // only speak when something actually changed — every CLI write lands
+        // here, and resetting the selects each time would feel like the app
+        // keeps erasing what you just typed
+        if (fresh != m_config) {
+            m_config = fresh;
+            emit configChanged();
+        }
         armWatch(m_configPath);
-        emit configChanged();
     } else {
         armWatch(m_configPath);
     }
@@ -235,6 +251,10 @@ QString Backend::statusLine() const {
 }
 
 void Backend::runCommand(const QStringList &args, const QString &niceError) {
+    if (!m_commandError.isEmpty()) {
+        m_commandError.clear(); // a fresh try starts with a clean conscience
+        emit lastErrorChanged();
+    }
     auto *proc = new QProcess(this);
     connect(proc, &QProcess::finished, this, [this, niceError](int code, QProcess::ExitStatus status) {
         auto *proc = qobject_cast<QProcess *>(sender());
@@ -243,11 +263,15 @@ void Backend::runCommand(const QStringList &args, const QString &niceError) {
             if (stderrText.isEmpty())
                 stderrText = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
             const QStringList lines = stderrText.split(u'\n', Qt::SkipEmptyParts);
-            m_lastError = !lines.isEmpty()
+            const QString next = !lines.isEmpty()
                 ? lines.last().left(180)
                 : QString();
-            if (!niceError.isEmpty() && m_lastError.isEmpty())
-                m_lastError = niceError;
+            if (!niceError.isEmpty() && next.isEmpty())
+                m_commandError = niceError;
+            else if (!next.isEmpty())
+                m_commandError = next;
+            else
+                m_commandError = tr("Check YouTube is ready and the stream key is set.");
             emit lastErrorChanged();
         }
         proc->deleteLater();
@@ -270,6 +294,9 @@ void Backend::toggleStream() {
 void Backend::startStream() {
     if (m_streaming)
         return;
+    m_commandError.clear();
+    m_stateError.clear();
+    emit lastErrorChanged();
     m_starting = true;
     emit busyChanged();
     runCommand({"start"}, tr("Check YouTube is ready and the stream key is set."));
@@ -282,6 +309,9 @@ void Backend::stopStream() {
 void Backend::startTest() {
     if (m_streaming)
         return;
+    m_commandError.clear();
+    m_stateError.clear();
+    emit lastErrorChanged();
     m_starting = true;
     emit busyChanged();
     runCommand({"test"}, tr("The capture test failed; check the log."));
@@ -289,6 +319,17 @@ void Backend::startTest() {
 
 void Backend::toggleCam() {
     runCommand(m_camVisible ? QStringList{"cam", "off"} : QStringList{"cam", "on"}, {});
+}
+
+void Backend::cycleCamShape() {
+    QString next = "circle";
+    if (m_camShape == "circle")
+        next = "1:1";
+    else if (m_camShape == "1:1")
+        next = "16:9";
+    else
+        next = "circle";
+    setCamShape(next);
 }
 
 void Backend::setCamShape(const QString &shape) {
@@ -305,12 +346,12 @@ void Backend::setSetting(const QString &key, const QVariant &value) {
     static const QStringList allowed{
         "STREAM_KEY", "VIDEO_CODEC", "VIDEO_BITRATE", "FPS", "AUDIO_SYSTEM", "AUDIO_MIC",
         "MIC_ENABLED", "CAM_DEVICE", "CAM_FLIP", "CAM_RECORD", "CAM_ON_START",
-        "DEFAULT_CAM_SHAPE", "CAM_FIT"};
+        "DEFAULT_CAM_SHAPE", "CAM_FIT", "CPU_FALLBACK"};
     if (!allowed.contains(key) || value.isNull())
         return;
     const QString text = value.toString();
     if (text.contains('\n') || text.contains('\'') || text.contains('"')) {
-        m_lastError = tr("Not a valid value for %1").arg(key);
+        m_commandError = tr("Not a valid value for %1").arg(key);
         emit lastErrorChanged();
         return;
     }
