@@ -26,7 +26,7 @@ ApplicationWindow {
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: backend.toggleStream() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: backend.toggleCam() }
-    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; onActivated: backend.startTest() }
+    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; onActivated: backend.toggleBar() }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: win.close() }
     Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: if (win.settingsOpen) win.settingsOpen = false }
 
@@ -190,9 +190,7 @@ ApplicationWindow {
             // Action label
             Text {
                 Layout.alignment: Qt.AlignHCenter
-                text: backend.streaming
-                      ? (backend.mode === "file" ? qsTr("Recording") : qsTr("Live"))
-                      : qsTr("Go live")
+                text: backend.streaming ? qsTr("Live") : qsTr("Go live")
                 color: "#f0f1f5"
                 font.family: "JetBrains Mono, monospace"
                 font.pixelSize: 17
@@ -205,7 +203,7 @@ ApplicationWindow {
                 spacing: 6
 
                 Text {
-                    text: backend.streaming ? (backend.mode === "file" ? qsTr("Local test") : qsTr("YouTube Live")) : qsTr("YouTube Live")
+                    text: qsTr("YouTube Live")
                     color: "#7e8299"
                     font.pixelSize: 11
                 }
@@ -466,52 +464,70 @@ ApplicationWindow {
                     }
                 }
             }
-        }
 
-        // ── Bottom Wide Action: Test Capture ──────────────────────────────────
-        Rectangle {
-            Layout.fillWidth: true
-            height: 42
-            radius: 8
-            color: testMouse.containsMouse ? "#23273a" : "#1a1d2b"
-            border.width: 1
-            border.color: "#25283c"
+            // Card 4: Top bar
+            Rectangle {
+                Layout.fillWidth: true
+                height: 44
+                radius: 8
+                color: "#1a1d2b"
+                border.width: 1
+                border.color: "#232638"
 
-            RowLayout {
-                anchors.centerIn: parent
-                spacing: 8
+                RowLayout {
+                    anchors {
+                        fill: parent
+                        leftMargin: 12
+                        rightMargin: 12
+                    }
+                    spacing: 10
 
-                Image {
-                    source: "qrc:/icons/folder.svg"
-                    sourceSize: Qt.size(24, 24)
-                    Layout.preferredWidth: 16
-                    Layout.preferredHeight: 16
-                    fillMode: Image.PreserveAspectFit
-                    opacity: 0.8
+                    Image {
+                        source: "qrc:/icons/monitor.svg"
+                        sourceSize: Qt.size(24, 24)
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
+                        fillMode: Image.PreserveAspectFit
+                        opacity: !backend.barHidden ? 0.9 : 0.4
+                    }
+
+                    Text {
+                        text: qsTr("Top bar")
+                        color: !backend.barHidden ? "#d8dae5" : "#6f738a"
+                        font.pixelSize: 13
+                    }
+
+                    Rectangle {
+                        radius: 4
+                        color: "#24283c"
+                        implicitWidth: barPillText.implicitWidth + 8
+                        implicitHeight: 18
+
+                        Text {
+                            id: barPillText
+                            anchors.centerIn: parent
+                            text: backend.barHidden ? qsTr("Hidden") : qsTr("Visible")
+                            color: "#8e93aa"
+                            font.family: "JetBrains Mono, monospace"
+                            font.pixelSize: 10
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Switch {
+                        id: barSwitch
+                        checked: !backend.barHidden
+                        onToggled: backend.setBarHidden(!checked)
+                    }
                 }
-
-                Text {
-                    text: qsTr("Test capture (8s)")
-                    color: "#f0f1f5"
-                    font.family: "JetBrains Mono, monospace"
-                    font.pixelSize: 12
-                    font.bold: true
-                }
-            }
-
-            MouseArea {
-                id: testMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: backend.startTest()
             }
         }
 
         // Footer note
         Text {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Stream is broadcast to YouTube Live")
+            text: qsTr("Press Space or click big button to go live to YouTube")
             color: "#5e6378"
             font.family: "JetBrains Mono, monospace"
             font.pixelSize: 10

@@ -99,6 +99,32 @@ private slots:
         QVERIFY(translator.translate("Main", "Quit").isNull());
     }
 
+    void barHiddenTracksFlagFile()
+    {
+        QTemporaryDir dir;
+        qputenv("XDG_STATE_HOME", dir.path().toLocal8Bit());
+        const QString toggleDir = dir.path() + "/omarchy/toggles";
+        QDir().mkpath(toggleDir);
+        const QString flagPath = toggleDir + "/bar-off";
+
+        Backend backend;
+        QCOMPARE(backend.barHidden(), false);
+
+        write(flagPath, "");
+        QVERIFY(QFile::exists(flagPath));
+
+        // updateBarHidden reads the flag file
+        QSignalSpy spy(&backend, &Backend::barHiddenChanged);
+        QMetaObject::invokeMethod(&backend, "updateBarHidden", Qt::DirectConnection);
+        QCOMPARE(backend.barHidden(), true);
+        QCOMPARE(spy.count(), 1);
+
+        QFile::remove(flagPath);
+        QMetaObject::invokeMethod(&backend, "updateBarHidden", Qt::DirectConnection);
+        QCOMPARE(backend.barHidden(), false);
+        QCOMPARE(spy.count(), 2);
+    }
+
 private:
     static void write(const QString &path, const QByteArray &contents)
     {

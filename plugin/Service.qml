@@ -37,7 +37,9 @@ Item {
     id: stateFile
     path: service.statePath
     watchChanges: true
+    atomicWrites: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: service.loadState(text())
     onLoadFailed: service.loadState("")
   }
@@ -46,7 +48,9 @@ Item {
     id: confFile
     path: service.confPath
     watchChanges: true
+    atomicWrites: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: service.loadConfig(text())
     onLoadFailed: service.loadConfig("")
   }
@@ -78,14 +82,18 @@ Item {
     }
   }
 
-  // inotify can miss the CLI's atomic rename; a slow heartbeat closes the gap.
+  function reloadState() {
+    stateFile.reload()
+    confFile.reload()
+  }
+
+  // inotify can miss the CLI's atomic rename; a heartbeat closes the gap.
   Timer {
-    interval: 15000
+    interval: 1000
     running: true
     repeat: true
     onTriggered: {
-      stateFile.reload()
-      confFile.reload()
+      service.reloadState()
     }
   }
 

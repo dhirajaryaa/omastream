@@ -32,8 +32,8 @@ PanelWindow {
     return m && m.name ? String(m.name)
       : (Quickshell.screens.length ? String(Quickshell.screens[0].name) : "")
   }
-  readonly property var cam: service.cam
-  readonly property string shape: service.camShape
+  readonly property var cam: service ? service.cam : null
+  readonly property string shape: service ? service.camShape : "16:9"
   readonly property string myKey: shape + "@" + screenName
   readonly property var allGeom: cam && cam.geometry ? cam.geometry : null
   readonly property bool haveShapeAnywhere: {
@@ -45,7 +45,7 @@ PanelWindow {
   }
   readonly property bool parkedHere: !!allGeom && !!allGeom[myKey]
   readonly property bool fallbackHost: !haveShapeAnywhere && screenName === focusScreenName
-  visible: service.camVisible && (parkedHere || fallbackHost)
+  visible: service ? (service.camVisible && (parkedHere || fallbackHost)) : false
 
   // ── geometry: fractions of the display, defaults mirror the CLI ─────────────
   readonly property real logicalW: screen && screen.width > 0 ? screen.width : 1920
@@ -64,15 +64,26 @@ PanelWindow {
   property point moveOriginMouse
   property point moveOriginFrac
   property real resizeOriginSize: -1
+  property bool moveDirty: false
+  property bool resizeDirty: false
+  readonly property bool hots: (typeof frame !== "undefined" && frame) ? frame.hots === true : false
+
+  onShapeGeomChanged: {
+    if (!moving && !resizing) {
+      dragX = -1
+      dragY = -1
+      dragSize = -1
+    }
+  }
 
   readonly property bool resizing: resizeArea.pressed
   readonly property bool moving: moveArea.pressed
   readonly property real sizeFrac: dragSize >= 0 ? dragSize
-    : (shapeGeom ? shapeGeom.size : defaults.size)
+    : (shapeGeom && typeof shapeGeom.size === "number" ? shapeGeom.size : (defaults ? defaults.size : 0.20))
   readonly property real xFrac: dragX >= 0 ? dragX
-    : (shapeGeom ? shapeGeom.x : defaults.x)
+    : (shapeGeom && typeof shapeGeom.x === "number" ? shapeGeom.x : (defaults ? defaults.x : 0.75))
   readonly property real yFrac: dragY >= 0 ? dragY
-    : (shapeGeom ? shapeGeom.y : defaults.y)
+    : (shapeGeom && typeof shapeGeom.y === "number" ? shapeGeom.y : (defaults ? defaults.y : 0.62))
 
   readonly property real fracH: shape === "16:9" ? sizeFrac * 9 / 16 : sizeFrac
   readonly property real boxWidth: Math.max(88, sizeFrac * logicalW)
@@ -104,14 +115,20 @@ PanelWindow {
   Process {
     id: saveProc
     onExited: () => {
-      root.dragX = -1
-      root.dragY = -1
-      root.dragSize = -1
-      root.resizeOriginSize = -1
+      if (root.service && typeof root.service.reloadState === "function") {
+        root.service.reloadState()
+      }
     }
   }
 
-  Process { id: cmdProc }
+  Process {
+    id: cmdProc
+    onExited: () => {
+      if (root.service && typeof root.service.reloadState === "function") {
+        root.service.reloadState()
+      }
+    }
+  }
 
   function runCmd(args) {
     cmdProc.command = [omastreamBin].concat(args)
@@ -138,6 +155,9 @@ PanelWindow {
     Qt.callLater(root.seedIfNeeded)
   }
   onShapeChanged: {
+    dragX = -1
+    dragY = -1
+    dragSize = -1
     seeding = false
     Qt.callLater(root.seedIfNeeded)
   }
@@ -153,9 +173,9 @@ PanelWindow {
 
   // state wins, config.env is the fallback (state may not carry it yet).
   readonly property bool flip: cam && cam.flip !== null && cam.flip !== undefined
-    ? cam.flip === true : service.camConf.flip === true
+    ? cam.flip === true : (service && service.camConf ? service.camConf.flip === true : true)
 
-  readonly property bool deviceHeldByGsr: service.gsrOwnsCamera
+  readonly property bool deviceHeldByGsr: service ? service.gsrOwnsCamera : false
   onDeviceHeldByGsrChanged: if (!deviceHeldByGsr) camera.deviceBusy = false
 
   Camera {
@@ -163,7 +183,7 @@ PanelWindow {
     cameraDevice: root.pickDevice()
     active: root.visible && !root.deviceHeldByGsr && !deviceBusy
     property bool deviceBusy: false
-    onCameraErrorOccurred: (error) => { deviceBusy = true }
+    onErrorOccurred: (error, errorString) => { deviceBusy = true }
   }
 
   function pickDevice() {
@@ -294,11 +314,15 @@ PanelWindow {
         root.moveOriginFrac = Qt.point(root.xFrac, root.yFrac)
         root.dragX = root.xFrac
         root.dragY = root.yFrac
+        root.moveDirty = false
       }
       onPositionChanged: (mouse) => {
         if (!pressed) return
-        root.dragX = root.moveOriginFrac.x + (mouse.x - root.moveOriginMouse.x) / root.logicalW
-        root.dragY = root.moveOriginFrac.y + (mouse.y - root.moveOriginMouse.y) / root.logicalH
+        var nx = root.moveOriginFrac.x + (mouse.x - root.moveOriginMouse.x) / root.logicalW
+        var ny = root.moveOriginFrac.y + (mouse.y - root.moveOriginMouse.y) / root.logicalH
+        root.dragX = Math.max(0, Math.min(nx, 1 - root.sizeFrac))
+        root.dragY = Math.max(0, Math.min(ny, 1 - root.fracH))
+        root.moveDirty = true
       }
       onReleased: root.commitMove()
       onCanceled: root.commitMove()
@@ -447,11 +471,13 @@ PanelWindow {
       onPressed: (mouse) => {
         root.resizeOriginSize = root.sizeFrac
         root.dragSize = root.sizeFrac
+        root.resizeDirty = false
       }
       onPositionChanged: (mouse) => {
         if (!pressed) return
         var ns = root.resizeOriginSize + (mouse.x + mouse.y) / 2 / root.logicalW
         root.dragSize = Math.max(0.05, Math.min(0.75, ns))
+        root.resizeDirty = true
       }
       onReleased: root.commitResize()
       onCanceled: root.commitResize()
@@ -467,12 +493,14 @@ PanelWindow {
   }
 
   function commitMove() {
-    if (dragX < 0) return
-    saveNow() // drag overrides clear once the CLI accepted the save
+    if (!root.moveDirty) return
+    root.moveDirty = false
+    saveNow()
   }
 
   function commitResize() {
-    if (dragSize < 0) return
+    if (!root.resizeDirty) return
+    root.resizeDirty = false
     saveNow()
   }
 }

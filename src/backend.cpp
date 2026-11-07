@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -11,6 +12,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QUrl>
 
 Backend::Backend(const QString &statePath, const QString &configPath, const QString &cli, QObject *parent)
     : QObject(parent) {
@@ -19,6 +21,7 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     const QString configHome = basePath("XDG_CONFIG_HOME", "/.config");
     m_configPath = !configPath.isEmpty() ? configPath : configHome + "/omastream/config.env";
     m_cli = !cli.isEmpty() ? cli : cliPath();
+    m_barOffTogglePath = stateHome + "/omarchy/toggles/bar-off";
 
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
@@ -27,15 +30,23 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     connect(&m_debounce, &QTimer::timeout, this, [this] {
         reloadState();
         reloadConfig();
+        updateBarHidden();
     });
 
     reloadState();
     reloadConfig();
+    updateBarHidden();
     refreshAudioDevices();
+
+    const QString togglesDir = stateHome + "/omarchy/toggles";
+    if (QDir(togglesDir).exists())
+        armWatch(togglesDir);
+    armWatch(m_barOffTogglePath);
 
     // The clock label ticks locally; the state file only carries startedAt.
     m_elapsedTimer.setInterval(1000);
     connect(&m_elapsedTimer, &QTimer::timeout, this, [this] {
+        updateBarHidden();
         if (m_streaming) {
             m_elapsed = formatElapsed(m_startedAt, QDateTime::currentMSecsSinceEpoch());
             emit stateChanged();
@@ -306,6 +317,29 @@ void Backend::stopStream() {
     runCommand({"stop"}, tr("The recorder refused to stop; check the log."));
 }
 
+void Backend::updateBarHidden() {
+    const bool hidden = QFile::exists(m_barOffTogglePath);
+    if (m_barHidden != hidden) {
+        m_barHidden = hidden;
+        emit barHiddenChanged();
+    }
+}
+
+void Backend::toggleBar() {
+    QProcess::startDetached("omarchy-toggle-bar", {});
+    QTimer::singleShot(150, this, [this] {
+        updateBarHidden();
+    });
+}
+
+void Backend::setBarHidden(bool hidden) {
+    if (m_barHidden != hidden) {
+        QProcess::startDetached("omarchy-toggle-bar", {hidden ? "on" : "off"});
+        m_barHidden = hidden;
+        emit barHiddenChanged();
+    }
+}
+
 void Backend::startTest() {
     if (m_streaming)
         return;
@@ -315,6 +349,17 @@ void Backend::startTest() {
     m_starting = true;
     emit busyChanged();
     runCommand({"test"}, tr("The capture test failed; check the log."));
+}
+
+void Backend::openTestFile() {
+    QString out = QString::fromLocal8Bit(qgetenv("XDG_STATE_HOME"));
+    if (out.isEmpty())
+        out = QDir::homePath() + "/.local/state";
+    const QString filePath = out + "/omastream/test.flv";
+    if (QFile::exists(filePath))
+        QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
+    else
+        QDesktopServices::openUrl(QUrl::fromLocalFile(out + "/omastream"));
 }
 
 void Backend::toggleCam() {
