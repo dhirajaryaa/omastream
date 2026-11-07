@@ -28,10 +28,8 @@ Item {
 
   // config.env defaults for the bits QML needs that state.json doesn't carry.
   property var camConf: ({})
-  // gpu-screen-recorder composites the camera into the stream while shown
-  // (CAM_RECORD), which locks the v4l2 device — the bubble then yields the
-  // device and shows its LIVE placeholder until the stream ends.
-  readonly property bool gsrOwnsCamera: streaming && (camConf.record !== false)
+  // Live camera bubble is captured on screen directly without v4l2 device locking
+  readonly property bool gsrOwnsCamera: false
 
   FileView {
     id: stateFile
@@ -96,52 +94,6 @@ Item {
       service.reloadState()
     }
   }
-
-  // ── capture exclusion (omareel-exclude bridge) ─────────────────────────────
-  property string excludePrefix: "omastream-"
-  property bool excludeSupported: false
-  property string excludeStateReq: "" // "add" | "remove" last requested
-
-  Process {
-    id: excludeProc
-    property string mode: "" // "probe" | "add" | "remove"
-
-    function run(args, kind) {
-      mode = kind
-      command = ["hyprctl"].concat(args)
-      running = true
-    }
-
-    onExited: (code) => {
-      if (mode === "probe") {
-        service.excludeSupported = code === 0
-        if (service.excludeSupported) service.syncExclusion()
-      }
-    }
-  }
-
-  function runExclude(kind, args) {
-    if (!excludeSupported) return
-    run(args, kind)
-  }
-
-  Component.onCompleted: excludeProc.run(["omareel-exclude", "status"], "probe")
-  Component.onDestruction: {
-    if (excludeSupported) excludeProc.run(["omareel-exclude", "remove", excludePrefix], "remove")
-  }
-
-  function syncExclusion() {
-    if (!excludeSupported) return
-    var active = service.streaming || (service.camVisible && service.gsrOwnsCamera)
-    var want = active ? "add" : "remove"
-    if (excludeStateReq === want) return
-    excludeStateReq = want
-    excludeProc.run(["omareel-exclude", want, excludePrefix], want)
-  }
-
-  onStreamingChanged: Qt.callLater(service.syncExclusion)
-  onCamVisibleChanged: Qt.callLater(service.syncExclusion)
-  onGsrOwnsCameraChanged: Qt.callLater(service.syncExclusion)
 
   // ── one camera bubble per display ─────────────────────────────────────────
   Variants {

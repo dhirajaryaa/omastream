@@ -21,7 +21,9 @@ class Backend : public QObject {
     Q_PROPERTY(bool camFlip READ camFlip NOTIFY stateChanged)
     Q_PROPERTY(bool starting READ starting NOTIFY busyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(bool hasStreamKey READ hasStreamKey NOTIFY configChanged)
     Q_PROPERTY(QString streamKey READ streamKey NOTIFY configChanged)
+    Q_PROPERTY(QString streamResolution READ streamResolution NOTIFY configChanged)
     Q_PROPERTY(QString audioSystem READ audioSystem NOTIFY configChanged)
     Q_PROPERTY(QString audioMic READ audioMic NOTIFY configChanged)
     Q_PROPERTY(bool micEnabled READ micEnabled NOTIFY configChanged)
@@ -44,6 +46,7 @@ public:
     QString camShape() const { return m_camShape; }
     bool camFlip() const { return m_camFlip; }
     bool starting() const { return m_starting; }
+    bool hasStreamKey() const { return !streamKey().trimmed().isEmpty(); }
     // What the user reads when something goes wrong: a command's own stderr
     // leads; the recorder's watchdog reason (written to state.json by the CLI)
     // follows. One honest line, no stack dumps.
@@ -52,6 +55,7 @@ public:
     }
 
     QString streamKey() const { return m_config.value("STREAM_KEY").toString(); }
+    QString streamResolution() const { return m_config.value("STREAM_RESOLUTION", "auto").toString(); }
     QString audioSystem() const { return m_config.value("AUDIO_SYSTEM", "auto").toString(); }
     QString audioMic() const { return m_config.value("AUDIO_MIC", "auto").toString(); }
     bool micEnabled() const { return m_config.value("MIC_ENABLED", "true").toString() != "false"; }
@@ -70,7 +74,9 @@ public:
     Q_INVOKABLE void toggleCam();
     Q_INVOKABLE void cycleCamShape();
     Q_INVOKABLE void setCamShape(const QString &shape);
+    Q_INVOKABLE void setCamCorner(const QString &corner);
     Q_INVOKABLE void setCamFlip(bool flip);
+    Q_INVOKABLE void openYouTubeStudio();
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void refreshAudioDevices();
 

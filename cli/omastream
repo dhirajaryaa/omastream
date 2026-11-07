@@ -95,12 +95,15 @@ state_get() { state_json | jq -r "$1 // empty" 2>/dev/null; }
 gsr_pid_alive() {
   local pid="${1:-}"
   [[ $pid =~ ^[0-9]+$ ]] || return 1
+  [[ $pid -gt 0 ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   if [[ -r "/proc/$pid/cmdline" ]]; then
     tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q "gpu-screen-recorder"
+  else
+    return 1
   fi
 }
-gsr_ours_running() { pgrep -f "omastream/gsr.sock" >/dev/null 2>&1; }
+gsr_ours_running() { pgrep -u "$UID" -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" >/dev/null 2>&1; }
 
 # ── capture target ───────────────────────────────────────────────────────────
 focused_monitor_name() {
@@ -156,6 +159,19 @@ norm_shape() {
     *) echo "" ;;
   esac
 }
+norm_resolution() {
+  local r
+  r="$(echo "${1:-auto}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$r" in
+    ""|auto|native|0x0|none) echo "auto" ;;
+    1080p|1080|fhd)         echo "1920x1080" ;;
+    720p|720|hd)            echo "1280x720" ;;
+    1440p|1440|2k|qhd)       echo "2560x1440" ;;
+    4k|2160p|2160|uhd)       echo "3840x2160" ;;
+    [0-9]*x[0-9]*)           echo "$r" ;;
+    *)                       echo "auto" ;;
+  esac
+}
 camera_shape() {
   local s; s="$(norm_shape "$(state_get '.cam.shape' '')")"
   [[ -n $s ]] && { echo "$s"; return; }
@@ -182,6 +198,9 @@ geom_for() { # materializes and echoes geometry for a (shape, screen) pair
   local key g
   key="$(geom_key "$1" "$2")"
   g=$(state_json | jq -c --arg k "$key" '.cam.geometry[$k] // empty' 2>/dev/null)
+  if [[ -z $g ]]; then
+    g=$(state_json | jq -c --arg prefix "$1@" '[.cam.geometry | to_entries[] | select(.key | startswith($prefix)) | .value][0] // empty' 2>/dev/null)
+  fi
   if [[ -z $g ]]; then
     g="$(default_geom "$1")"
     state_merge "{\"cam\":{\"geometry\":{\"$key\":$g}}}"
@@ -288,15 +307,16 @@ cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
   load_config
   need "$GSR_BIN"; need "$GSR_CLI"; need jq
 
-  local camflag="" file_out="" cpu_fallback
+  local camflag="" file_out="" cpu_fallback res_flag=""
   cpu_fallback="$(cfg_bool CPU_FALLBACK true)"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --cam)             camflag="${2:-}"; shift 2 ;;
-      --file)            file_out="${2:-}"; shift 2 ;;
-      --cpu-fallback)    cpu_fallback=true; shift ;;
-      --no-cpu-fallback) cpu_fallback=false; shift ;;
-      *)                 die "unknown start option: $1" ;;
+      --cam)              camflag="${2:-}"; shift 2 ;;
+      --file)             file_out="${2:-}"; shift 2 ;;
+      --res|--resolution) res_flag="${2:-}"; shift 2 ;;
+      --cpu-fallback)     cpu_fallback=true; shift ;;
+      --no-cpu-fallback)  cpu_fallback=false; shift ;;
+      *)                  die "unknown start option: $1" ;;
     esac
   done
 
@@ -340,20 +360,14 @@ local check:  omastream-cli test"
 
   # build the recorder command
   local -a args=()
-  local capture screen_key
+  local capture screen_key res
   capture="$(resolve_capture)"
   screen_key="$(capture_monitor_name)"
-  if [[ $visible == true && $record == true ]]; then
-    local geom opts fliparg mgeo=""
-    geom="$(geom_for "$shape" "$screen_key")"
-    if [[ $capture == "screen" ]]; then
-      mgeo="$(virtual_geometry "$screen_key")" || mgeo=""
-    fi
-    opts="$(composite_opts "$shape" "$geom" $mgeo)"
-    if [[ $flip == true ]]; then fliparg=true; else fliparg=false; fi
-    args+=(-w "$capture|v4l2:$(cfg CAM_DEVICE /dev/video0);hflip=$fliparg;$opts")
-  else
-    args+=(-w "$capture")
+  res="${res_flag:-$(cfg STREAM_RESOLUTION auto)}"
+  res="$(norm_resolution "$res")"
+  args+=(-w "$capture")
+  if [[ -n $res && $res != "auto" && $res != "0x0" ]]; then
+    args+=(-s "$res")
   fi
   args+=(
     -f "$(cfg FPS 30)"
@@ -408,7 +422,7 @@ local check:  omastream-cli test"
     die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
   fi
 
-  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"lastError\":null,\"stopRequested\":false}"
+  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"resolution\":\"$res\",\"lastError\":null,\"stopRequested\":false}"
   log "running: pid=$pid mode=$mode"
 
   # watchdog — flips state the moment the recorder dies, whatever the cause
@@ -428,24 +442,36 @@ cmd_stop() {
   [[ $pid =~ ^[0-9]+$ ]] && [[ $pid -gt 0 ]] && state_merge '{"stopRequested":true}'
   if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" stop >/dev/null 2>&1; then
     handled=true
-    for ((i = 0; i < 100 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+    for ((i = 0; i < 100; i++)); do
+      gsr_pid_alive "$pid" || break
+      sleep 0.1
+    done
   fi
   if gsr_pid_alive "$pid"; then
     handled=true
     kill -INT "$pid" 2>/dev/null
-    for ((i = 0; i < 80 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+    for ((i = 0; i < 80; i++)); do
+      gsr_pid_alive "$pid" || break
+      sleep 0.1
+    done
     if gsr_pid_alive "$pid"; then
       kill -TERM "$pid" 2>/dev/null
-      for ((i = 0; i < 30 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+      for ((i = 0; i < 30; i++)); do
+        gsr_pid_alive "$pid" || break
+        sleep 0.1
+      done
       gsr_pid_alive "$pid" && kill -KILL "$pid" 2>/dev/null
     fi
   fi
   if [[ $handled != true ]]; then
     if gsr_ours_running; then
       handled=true
-      pkill -INT -f "omastream/gsr.sock" 2>/dev/null
-      for ((i = 0; i < 100 && gsr_ours_running; i++)); do sleep 0.1; done
-      gsr_ours_running && pkill -KILL -f "omastream/gsr.sock" 2>/dev/null
+      pkill -u "$UID" -INT -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" 2>/dev/null
+      for ((i = 0; i < 100; i++)); do
+        gsr_ours_running || break
+        sleep 0.1
+      done
+      gsr_ours_running && pkill -u "$UID" -KILL -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" 2>/dev/null
     fi
   fi
   if [[ $handled != true && "$(state_get '.streaming' false)" != "true" ]]; then
@@ -585,12 +611,12 @@ cmd_cam() { # cmd_cam <sub> [args…]
       x=$(jq -re '.x' <<<"$payload" 2>/dev/null)
       y=$(jq -re '.y' <<<"$payload" 2>/dev/null)
       size=$(jq -re '.size' <<<"$payload" 2>/dev/null)
-      screen="$(jq -re '.screen // ""' <<<"$payload" 2>/dev/null)"
+      screen="$(jq -re '.screen // "screen"' <<<"$payload" 2>/dev/null)"
       shape=$(jq -re '.shape // ""' <<<"$payload" 2>/dev/null)
       shape="$(norm_shape "$shape")"
       [[ -n $shape ]] || shape="$(camera_shape)"
       [[ $x =~ ^-?[0-9.]+$ && $y =~ ^-?[0-9.]+$ && $size =~ ^[0-9.]+$ ]] || die "cam save: x, y and size must be numbers"
-      [[ -n $screen ]] || die "cam save: screen name required"
+      [[ -n $screen ]] || screen="screen"
       awk -v s="$size" 'BEGIN { exit (s >= 0.05 && s <= 0.75 ? 0 : 1) }' || die "cam save: size must be 0.05–0.75 of screen width"
       case "$shape" in
         16:9) contentH="$(awk -v s="$size" 'BEGIN { printf "%.6f", s * 9 / 16 }')" ;;
@@ -599,9 +625,22 @@ cmd_cam() { # cmd_cam <sub> [args…]
       capX="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s }')"
       capY="$(awk -v s="$contentH" 'BEGIN { printf "%.6f", 1 - s }')"
       x="$(clamp_frac "$x" "$capX")"; y="$(clamp_frac "$y" "$capY")"
-      key="$(geom_key "$shape" "$screen")"
-      state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}}}"
-      printf '{"%s":{"x":%s,"y":%s,"size":%s}}\n' "$key" "$x" "$y" "$size"
+      if [[ $screen == "screen" || $screen == "all" ]]; then
+        local patch
+        patch=$(state_json | jq -c --arg shape "$shape" --argjson x "$x" --argjson y "$y" --argjson size "$size" '
+          .cam.geometry // {} | to_entries
+          | map(select(.key | startswith($shape + "@")))
+          | map({(.key): {x: $x, y: $y, size: $size}})
+          | add // {}
+          | .[($shape + "@screen")] = {x: $x, y: $y, size: $size}
+        ' 2>/dev/null)
+        state_merge "{\"cam\":{\"geometry\":$patch}}"
+        printf '{"%s@screen":{"x":%s,"y":%s,"size":%s}}\n' "$shape" "$x" "$y" "$size"
+      else
+        key="$(geom_key "$shape" "$screen")"
+        state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}}}"
+        printf '{"%s":{"x":%s,"y":%s,"size":%s}}\n' "$key" "$x" "$y" "$size"
+      fi
       ;;
     status)
       state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
@@ -622,6 +661,8 @@ create_config() {
 STREAM_KEY=
 
 # ── video ────────────────────────────────────────────────────────────────────
+# STREAM_RESOLUTION=auto | 1920x1080 | 1280x720 | 2560x1440 | 3840x2160 (or any WxH)
+STREAM_RESOLUTION=auto
 # h264  = YouTube RTMP ingest (VA-API QuickSync on Intel)
 # hevc  = try it if you like; YouTube RTMP may reject it
 VIDEO_CODEC=h264
@@ -673,9 +714,9 @@ cmd_config() {
       local value allowed
       key="${1:-}"; value="${2:-}"
       # app-facing settings; keep this list to what gpu-screen-recorder can use
-      allowed="|STREAM_KEY|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
+      allowed="|STREAM_KEY|STREAM_RESOLUTION|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
       [[ $value != *[\"\'$'\n'\\]* ]] || die "invalid value for $key"
-      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
+      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY STREAM_RESOLUTION VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
       create_config
       if grep -q "^${key}=" "$CONFIG_FILE"; then
         sed -i "s#^${key}=.*#${key}='$value'#" "$CONFIG_FILE"
@@ -741,7 +782,7 @@ usage() {
 omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → RTMP/YouTube)
 
   omastream-cli                          status summary
-  omastream-cli start [--cam on|off] [--file PATH] [--cpu-fallback]
+  omastream-cli start [--cam on|off] [--res WxH] [--file PATH] [--cpu-fallback]
                                      go live (STREAM_KEY) or record to PATH
   omastream-cli stop                     graceful stop (SIGINT closes the RTMP stream)
   omastream-cli toggle                   stop ↔ start

@@ -1,5 +1,5 @@
 import QtQuick
-import Qt5Compat.GraphicalEffects
+import QtQuick.Effects
 import QtMultimedia
 import Quickshell
 import Quickshell.Io
@@ -17,9 +17,6 @@ import qs.Commons
 // Shapes: circle / 1:1 / 16:9. Drag to move, grab the bottom-right grip to
 // resize (the shape ratio is kept). Persisted through `omastream-cli cam save` —
 // the CLI stays the single state writer.
-//
-// While gsr holds the camera for the stream the device is busy: the preview
-// pauses and shows a themed LIVE placeholder until the stream ends.
 PanelWindow {
   id: root
 
@@ -43,7 +40,15 @@ PanelWindow {
     }
     return false
   }
-  readonly property bool parkedHere: !!allGeom && !!allGeom[myKey]
+
+  readonly property var shapeGeom: {
+    if (!allGeom) return null
+    if (allGeom[myKey]) return allGeom[myKey]
+    if (allGeom[shape + "@screen"] && screenName === focusScreenName) return allGeom[shape + "@screen"]
+    if (allGeom[shape + "@screen"] && Quickshell.screens.length <= 1) return allGeom[shape + "@screen"]
+    return null
+  }
+  readonly property bool parkedHere: shapeGeom !== null
   readonly property bool fallbackHost: !haveShapeAnywhere && screenName === focusScreenName
   visible: service ? (service.camVisible && (parkedHere || fallbackHost)) : false
 
@@ -51,7 +56,6 @@ PanelWindow {
   readonly property real logicalW: screen && screen.width > 0 ? screen.width : 1920
   readonly property real logicalH: screen && screen.height > 0 ? screen.height : 1080
 
-  readonly property var shapeGeom: parkedHere ? allGeom[myKey] : null
   readonly property var defaults: {
     if (shape === "circle") return { "x": 0.78, "y": 0.68, "size": 0.17 }
     if (shape === "1:1") return { "x": 0.75, "y": 0.62, "size": 0.20 }
@@ -63,6 +67,7 @@ PanelWindow {
   property real dragSize: -1
   property point moveOriginMouse
   property point moveOriginFrac
+  property point resizeOriginMouse
   property real resizeOriginSize: -1
   property bool moveDirty: false
   property bool resizeDirty: false
@@ -94,12 +99,8 @@ PanelWindow {
   readonly property real xPos: Math.max(0, Math.min(xFrac, 1 - sizeFrac)) * logicalW
   readonly property real yPos: Math.max(0, Math.min(yFrac, 1 - fracH)) * logicalH
 
-  anchors { top: true; left: true }
+  anchors { top: true; bottom: true; left: true; right: true }
   color: "transparent"
-  implicitWidth: Math.round(boxWidth)
-  implicitHeight: Math.round(boxHeight)
-  margins.left: Math.round(xPos)
-  margins.top: Math.round(yPos)
 
   WlrLayershell.namespace: "omastream-bubble"
   WlrLayershell.layer: WlrLayer.Overlay
@@ -175,15 +176,15 @@ PanelWindow {
   readonly property bool flip: cam && cam.flip !== null && cam.flip !== undefined
     ? cam.flip === true : (service && service.camConf ? service.camConf.flip === true : true)
 
-  readonly property bool deviceHeldByGsr: service ? service.gsrOwnsCamera : false
-  onDeviceHeldByGsrChanged: if (!deviceHeldByGsr) camera.deviceBusy = false
-
   Camera {
     id: camera
     cameraDevice: root.pickDevice()
-    active: root.visible && !root.deviceHeldByGsr && !deviceBusy
+    active: root.visible && !deviceBusy
     property bool deviceBusy: false
-    onErrorOccurred: (error, errorString) => { deviceBusy = true }
+    onErrorOccurred: (error, errorString) => {
+      console.warn("CameraBubble camera error: " + errorString)
+      deviceBusy = true
+    }
   }
 
   function pickDevice() {
@@ -205,13 +206,15 @@ PanelWindow {
     videoOutput: videoOut
   }
 
-  readonly property bool videoShowing: camera.active && !camera.deviceBusy
-    && !deviceHeldByGsr && camera.cameraDevice !== null
+  readonly property bool videoShowing: camera.active && !camera.deviceBusy && camera.cameraDevice !== null
 
   // ── the bubble ───────────────────────────────────────────────────────────────
   Rectangle {
     id: frame
-    anchors.fill: parent
+    x: Math.round(root.xPos)
+    y: Math.round(root.yPos)
+    width: Math.round(root.boxWidth)
+    height: Math.round(root.boxHeight)
     radius: root.radius
     color: Color.background
     border.width: root.resizing || root.moving ? 2 : Style.normalBorderWidth
@@ -230,24 +233,30 @@ PanelWindow {
         fillMode: VideoOutput.PreserveAspectCrop
         scale: root.flip ? -1 : 1
         transformOrigin: Item.Center
+        layer.enabled: true
+        layer.effect: MultiEffect {
+          maskEnabled: true
+          maskSource: videoMask
+          maskThresholdMin: 0.5
+          maskSpreadAtMin: 1.0
+        }
       }
 
-      Rectangle { // shape mask fed to the opacity mask
+      Item {
         id: videoMask
+        anchors.fill: parent
         visible: false
-        anchors.fill: parent
-        radius: root.radius
-        color: "#000000"
-      }
+        layer.enabled: true
 
-      OpacityMask {
-        anchors.fill: parent
-        source: videoOut
-        maskSource: videoMask
+        Rectangle {
+          anchors.fill: parent
+          radius: root.radius
+          color: "black"
+        }
       }
     }
 
-    // placeholder: gsr holds the camera for the stream, or none exists
+    // placeholder: camera loading or no camera device plugged in
     Item {
       id: placeholder
       anchors.fill: parent
@@ -280,25 +289,6 @@ PanelWindow {
           color: Color.background
         }
       }
-
-      Rectangle { // pulsing corner dot while it is composited live
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.topMargin: Style.space(2)
-        anchors.rightMargin: Style.space(2)
-        visible: root.deviceHeldByGsr
-        width: Style.space(10)
-        height: width
-        radius: width / 2
-        color: Color.urgent
-
-        SequentialAnimation on opacity {
-          running: root.deviceHeldByGsr
-          loops: Animation.Infinite
-          NumberAnimation { from: 1.0; to: 0.35; duration: Style.duration(750) }
-          NumberAnimation { from: 0.35; to: 1.0; duration: Style.duration(750) }
-        }
-      }
     }
 
     // ── move ────────────────────────────────────────────────────────────────────
@@ -310,7 +300,8 @@ PanelWindow {
       cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
       onPressed: (mouse) => {
-        root.moveOriginMouse = Qt.point(mouse.x, mouse.y)
+        var pt = moveArea.mapToItem(null, mouse.x, mouse.y)
+        root.moveOriginMouse = Qt.point(pt.x, pt.y)
         root.moveOriginFrac = Qt.point(root.xFrac, root.yFrac)
         root.dragX = root.xFrac
         root.dragY = root.yFrac
@@ -318,8 +309,9 @@ PanelWindow {
       }
       onPositionChanged: (mouse) => {
         if (!pressed) return
-        var nx = root.moveOriginFrac.x + (mouse.x - root.moveOriginMouse.x) / root.logicalW
-        var ny = root.moveOriginFrac.y + (mouse.y - root.moveOriginMouse.y) / root.logicalH
+        var pt = moveArea.mapToItem(null, mouse.x, mouse.y)
+        var nx = root.moveOriginFrac.x + (pt.x - root.moveOriginMouse.x) / root.logicalW
+        var ny = root.moveOriginFrac.y + (pt.y - root.moveOriginMouse.y) / root.logicalH
         root.dragX = Math.max(0, Math.min(nx, 1 - root.sizeFrac))
         root.dragY = Math.max(0, Math.min(ny, 1 - root.fracH))
         root.moveDirty = true
@@ -469,13 +461,17 @@ PanelWindow {
       visible: root.hots
 
       onPressed: (mouse) => {
+        var pt = resizeArea.mapToItem(null, mouse.x, mouse.y)
+        root.resizeOriginMouse = Qt.point(pt.x, pt.y)
         root.resizeOriginSize = root.sizeFrac
         root.dragSize = root.sizeFrac
         root.resizeDirty = false
       }
       onPositionChanged: (mouse) => {
         if (!pressed) return
-        var ns = root.resizeOriginSize + (mouse.x + mouse.y) / 2 / root.logicalW
+        var pt = resizeArea.mapToItem(null, mouse.x, mouse.y)
+        var delta = ((pt.x - root.resizeOriginMouse.x) + (pt.y - root.resizeOriginMouse.y)) / 2
+        var ns = root.resizeOriginSize + delta / root.logicalW
         root.dragSize = Math.max(0.05, Math.min(0.75, ns))
         root.resizeDirty = true
       }

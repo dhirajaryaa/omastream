@@ -75,6 +75,11 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
         m_microphones = mics;
         emit audioDevicesChanged();
     });
+
+    // Show camera preview overlay on launch so the streamer can preview framing & position
+    runCommand({"cam", "on"}, {});
+    m_camVisible = true;
+    emit stateChanged();
 }
 
 QString Backend::basePath(const char *xdgName, const char *fallback) {
@@ -194,8 +199,6 @@ void Backend::applyState(const QJsonObject &state) {
     const QString mode = state.value("mode").toString("stream");
     const QString output = state.value("output").toString();
     const auto cam = state.value("cam").toObject();
-    const bool camVisible = cam.value("visible").toBool();
-    const QString camShape = cam.value("shape").toString("16:9");
 
     const bool stopped = m_streaming && !streaming;
 
@@ -203,12 +206,12 @@ void Backend::applyState(const QJsonObject &state) {
     m_startedAt = startedAt;
     m_mode = mode;
     m_output = output;
-    m_camVisible = camVisible;
-    m_camShape = camShape;
 
-    // The bubble preview yields the device while gsr composites the camera,
-    // which the state's flip mirrors; config.env is the fallback before that.
-    if (cam.value("flip").isBool())
+    if (cam.contains("shape") && !cam.value("shape").toString().isEmpty())
+        m_camShape = cam.value("shape").toString();
+    if (cam.contains("visible"))
+        m_camVisible = cam.value("visible").toBool();
+    if (cam.contains("flip") && cam.value("flip").isBool())
         m_camFlip = cam.value("flip").toBool();
 
     // The recorder's watchdog speaks through state.json when it dies alone.
@@ -339,7 +342,9 @@ void Backend::openTestFile() {
 }
 
 void Backend::toggleCam() {
-    runCommand(m_camVisible ? QStringList{"cam", "off"} : QStringList{"cam", "on"}, {});
+    m_camVisible = !m_camVisible;
+    emit stateChanged();
+    runCommand(m_camVisible ? QStringList{"cam", "on"} : QStringList{"cam", "off"}, {});
 }
 
 void Backend::cycleCamShape() {
@@ -356,16 +361,61 @@ void Backend::cycleCamShape() {
 void Backend::setCamShape(const QString &shape) {
     if (shape != "circle" && shape != "1:1" && shape != "16:9")
         return;
+    if (m_camShape != shape) {
+        m_camShape = shape;
+        emit stateChanged();
+    }
     runCommand({"cam", "shape", shape}, {});
 }
 
 void Backend::setCamFlip(bool flip) {
-    setSetting("CAM_FLIP", flip);
+    if (m_camFlip != flip) {
+        m_camFlip = flip;
+        emit stateChanged();
+    }
+    setSetting("CAM_FLIP", flip ? QStringLiteral("true") : QStringLiteral("false"));
+    runCommand({"cam", "flip", flip ? QStringLiteral("true") : QStringLiteral("false")}, {});
+}
+
+void Backend::setCamCorner(const QString &corner) {
+    double size = 0.20;
+    if (m_camShape == "circle") size = 0.17;
+    else if (m_camShape == "16:9") size = 0.30;
+
+    const double fracH = m_camShape == "16:9" ? (size * 9.0 / 16.0) : size;
+    double x = 0.75, y = 0.62;
+    if (corner == "bottom-right") {
+        x = 1.0 - size - 0.03;
+        y = 1.0 - fracH - 0.04;
+    } else if (corner == "bottom-left") {
+        x = 0.03;
+        y = 1.0 - fracH - 0.04;
+    } else if (corner == "top-right") {
+        x = 1.0 - size - 0.03;
+        y = 0.04;
+    } else if (corner == "top-left") {
+        x = 0.03;
+        y = 0.04;
+    }
+
+    QJsonObject geom;
+    geom["shape"] = m_camShape;
+    geom["screen"] = "screen";
+    geom["x"] = x;
+    geom["y"] = y;
+    geom["size"] = size;
+
+    QJsonDocument doc(geom);
+    runCommand({"cam", "save", QString::fromUtf8(doc.toJson(QJsonDocument::Compact))}, {});
+}
+
+void Backend::openYouTubeStudio() {
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://studio.youtube.com")));
 }
 
 void Backend::setSetting(const QString &key, const QVariant &value) {
     static const QStringList allowed{
-        "STREAM_KEY", "VIDEO_CODEC", "VIDEO_BITRATE", "FPS", "AUDIO_SYSTEM", "AUDIO_MIC",
+        "STREAM_KEY", "STREAM_RESOLUTION", "VIDEO_CODEC", "VIDEO_BITRATE", "FPS", "AUDIO_SYSTEM", "AUDIO_MIC",
         "MIC_ENABLED", "CAM_DEVICE", "CAM_FLIP", "CAM_RECORD", "CAM_ON_START",
         "DEFAULT_CAM_SHAPE", "CAM_FIT", "CPU_FALLBACK"};
     if (!allowed.contains(key) || value.isNull())

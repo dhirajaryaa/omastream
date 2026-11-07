@@ -19,6 +19,7 @@ private slots:
     {
         const QVariantMap config = Backend::parseConfig(QByteArray(
             "STREAM_KEY='abc/123#not-a-comment'\n"
+            "STREAM_RESOLUTION=1920x1080\n"
             "VIDEO_BITRATE=4500     # kbps, CBR\n"
             " AUDIO_SYSTEM =  device:alsa_output.monitor \n"
             "\"MIC_ENABLED\"=true\n"
@@ -26,6 +27,7 @@ private slots:
             "# a full comment — even carrying = — is not a key\n"
             "CAM_FLIP=\"true\" # quoted\n"));
         QCOMPARE(config.value("STREAM_KEY").toString(), "abc/123#not-a-comment");
+        QCOMPARE(config.value("STREAM_RESOLUTION").toString(), "1920x1080");
         QCOMPARE(config.value("VIDEO_BITRATE").toString(), "4500");
         QCOMPARE(config.value("AUDIO_SYSTEM").toString(), "device:alsa_output.monitor");
         QCOMPARE(config.value("MIC_ENABLED").toString(), "true");
