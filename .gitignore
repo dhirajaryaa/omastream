@@ -1,0 +1,14 @@
+# stream keys and local settings never leave the machine
+config/config.env
+/config.env
+
+# runtime artifacts
+*.flv
+*.mp4
+state/
+run/
+*.log
+
+# editor noise
+.Trash-*/
+*.swp
