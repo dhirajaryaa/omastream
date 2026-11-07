@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "dhirajarya.omastream",
+  "name": "Omastream",
+  "version": "1.0.0",
+  "author": "dhirajaryaa",
+  "description": "YouTube Live streaming from Omarchy: multi-shape camera bubble (circle / 1:1 / 16:9) with drag and resize, plus a LIVE bar indicator that stops the stream on click.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omastream LIVE",
+    "description": "Red LIVE badge with uptime while omastream streams; click to stop, middle-click to toggle the camera bubble.",
+    "category": "Streaming",
+    "aliases": [
+      "stream",
+      "live",
+      "youtube"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
