@@ -53,9 +53,10 @@ load_config() {
     value="${line#*=}"
     value="${value%$'\r'}"
     value="${value%%#*}"        # strip inline comments: KEY=value  # note
+    while [[ $value == [[:space:]]* ]]; do value="${value#?}"; done
+    while [[ $value == *[[:space:]] ]]; do value="${value%?}"; done
     value="${value%\"}"; value="${value#\"}"
     value="${value%\'}"; value="${value#\'}"
-    value="${value% }"; value="${value# }"
     CONFIG[$key]="$value"
   done < "$CONFIG_FILE"
 }
@@ -112,10 +113,37 @@ resolve_capture() {
   case "$(echo "$(cfg CAPTURE auto)" | tr '[:upper:]' '[:lower:]')" in
     screen) echo "screen" ;;
     monitor:*) echo "$(cfg CAPTURE)" ;;
-    *) local m; m="$(focused_monitor_name)"; [[ -n $m ]] && echo "monitor:$m" || echo "screen" ;;
+    track:*) echo "$(cfg CAPTURE)" ;;
+    *) if [[ -n ${WAYLAND_DISPLAY:-}${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+         # this gsr build captures the whole desktop on wayland: "screen"
+         echo "screen"
+       else
+         local m; m="$(focused_monitor_name)"; [[ -n $m ]] && echo "monitor:$m" || echo "screen"
+       fi ;;
   esac
 }
 capture_monitor_name() { resolve_capture | sed 's#^monitor:##'; }
+
+# monitor + virtual-desktop geometry for screen-capture composite math.
+# prints "mx my mw mh vx vy vw vh" (monitor rect, virtual rect), empty when
+# the maths collapses to identity (one monitor, same as the monitor rect).
+virtual_geometry() {
+  local name="$1" line mx my mw mh vx vy vw vh
+  command -v hyprctl >/dev/null 2>&1 || return 1
+  line=$(hyprctl -j monitors 2>/dev/null | jq -r --arg n "$name" '
+    ([.[] | select(.name == $n)][0]) as $m
+    | if $m == null then "" else
+        ([.[].x] | min) as $vx
+        | ([.[].y] | min) as $vy
+        | ([.[] | .x + .width] | max) as $vw
+        | ([.[] | .y + .height] | max) as $vh
+        | "\($m.x) \($m.y) \($m.width) \($m.height) \($vx) \($vy) \($vw) \($vh)"
+      end' 2>/dev/null)
+  [[ $line =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]] || return 1
+  read -r mx my mw mh vx vy vw vh <<<"$line"
+  [[ $mx == $vx && $my == $vy && $mw == $vw && $mh == $vh ]] && return 1
+  echo "$mx $my $mw $mh $vx $vy $vw $vh"
+}
 
 # ── camera shapes and geometry ───────────────────────────────────────────────
 norm_shape() {
@@ -169,24 +197,51 @@ cam_source_resolution() { # echoes "WxH" of the camera capture mode
 }
 
 composite_opts() { # percent args so the stream window matches the bubble
+  # optional args 3-10: "mx my mw mh vx vy vw vh" — monitor and virtual-desktop
+  # rects for whole-screen captures. They translate the camera fractions of
+  # the parked monitor into fractions of the full capture so the camera sits
+  # where the bubble sits even when several monitors feed one frame.
   local shape="$1" geom="$2"
+  local mx=0 my=0 mw=0 mh=0 vx=0 vy=0 vw=0 vh=0 havevirt=0
+  if (( $# >= 10 )); then
+    mx="$3"; my="$4"; mw="$5"; mh="$6"; vx="$7"; vy="$8"; vw="$9"; vh="${10}"
+    havevirt=1
+  fi
   local fit dev sw sh fx fy sz wpct hpct xpct ypct
   fit="$(echo "$(cfg CAM_FIT aspect)" | tr '[:upper:]' '[:lower:]')"
   dev="$(cfg CAM_DEVICE /dev/video0)"
   sw="$(cam_source_resolution "$dev" | cut -dx -f1)"
   sh="$(cam_source_resolution "$dev" | cut -dx -f2)"
   fx=$(jq -r '.x' <<<"$geom"); fy=$(jq -r '.y' <<<"$geom"); sz=$(jq -r '.size' <<<"$geom")
-  wpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 }')
-  if [[ $fit == shape ]]; then
-    hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", (( $2 == "16:9" ) ? s * 9 / 16 : s) * 100 }' "$shape" 2>/dev/null || true)
-    hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 }')
-    [[ $shape == "16:9" ]] && hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 * 9 / 16 }')
-  else
-    if (( sw > 0 && sh > 0 )); then
-      hpct=$(awk -v s="$sz" -v w="$sw" -v h="$sh" 'BEGIN { printf "%.4f", s * 100 * h / w }')
+  if (( havevirt )); then
+    wpct=$(awk -v s="$sz" -v mw="$mw" -v vw="$vw" 'BEGIN { printf "%.4f", s * 100 * mw / vw }')
+    if [[ $fit == shape ]]; then
+      if [[ $shape == "16:9" ]]; then
+        hpct=$(awk -v s="$sz" -v mw="$mw" -v vw="$vw" 'BEGIN { printf "%.4f", s * 100 * 9 / 16 * mw / vw }')
+      else
+        hpct="$wpct"
+      fi
+    elif (( sw > 0 && sh > 0 )); then
+      hpct=$(awk -v s="$sz" -v w="$sw" -v h="$sh" -v mw="$mw" -v vw="$vw" 'BEGIN { printf "%.4f", s * 100 * h / w * mw / vw }')
     else
       hpct="$wpct"
     fi
+    xpct=$(awk -v fx="$fx" -v mx="$mx" -v vx="$vx" -v mw="$mw" -v vw="$vw" 'BEGIN { printf "%.4f", (mx - vx + fx * mw) / vw * 100 }')
+    ypct=$(awk -v fy="$fy" -v my="$my" -v vy="$vy" -v mh="$mh" -v vh="$vh" 'BEGIN { printf "%.4f", (my - vy + fy * mh) / vh * 100 }')
+    echo "width=${wpct}%;height=${hpct}%;x=${xpct}%;y=${ypct}%"
+    return
+  fi
+  wpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 }')
+  if [[ $fit == shape ]]; then
+    if [[ $shape == "16:9" ]]; then
+      hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 * 9 / 16 }')
+    else
+      hpct="$wpct"
+    fi
+  elif (( sw > 0 && sh > 0 )); then
+    hpct=$(awk -v s="$sz" -v w="$sw" -v h="$sh" 'BEGIN { printf "%.4f", s * 100 * h / w }')
+  else
+    hpct="$wpct"
   fi
   xpct=$(awk -v f="$fx" 'BEGIN { printf "%.4f", f * 100 }')
   ypct=$(awk -v f="$fy" 'BEGIN { printf "%.4f", f * 100 }')
@@ -286,9 +341,12 @@ local check:  omastream test"
   capture="$(resolve_capture)"
   screen_key="$(capture_monitor_name)"
   if [[ $visible == true && $record == true ]]; then
-    local geom opts fliparg
+    local geom opts fliparg mgeo=""
     geom="$(geom_for "$shape" "$screen_key")"
-    opts="$(composite_opts "$shape" "$geom")"
+    if [[ $capture == "screen" ]]; then
+      mgeo="$(virtual_geometry "$screen_key")" || mgeo=""
+    fi
+    opts="$(composite_opts "$shape" "$geom" $mgeo)"
     if [[ $flip == true ]]; then fliparg=true; else fliparg=false; fi
     args+=(-w "$capture|v4l2:$(cfg CAM_DEVICE /dev/video0);hflip=$fliparg;$opts")
   else
