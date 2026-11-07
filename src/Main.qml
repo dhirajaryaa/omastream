@@ -6,12 +6,13 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: win
 
-    width: 360
-    height: 570
-    minimumWidth: 340
+    width: 380
+    height: 520
+    minimumWidth: 380
+    maximumWidth: 380
     minimumHeight: 520
-    maximumWidth: 420
-    maximumHeight: 660
+    maximumHeight: 520
+    flags: Qt.Dialog | Qt.WindowCloseButtonHint
     visible: true
     title: "omastream"
     color: "#13141f"
