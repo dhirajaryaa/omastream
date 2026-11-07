@@ -1,0 +1,678 @@
+#!/usr/bin/env bash
+# omastream — Omarchy-native RTMP streaming control.
+#
+# Drives gpu-screen-recorder for zero-lag, hardware-accelerated (VA-API)
+# streaming to YouTube Live (or any RTMP endpoint). The omastream shell
+# plugin renders the multi-shape camera bubble and the LIVE bar indicator;
+# it only watches state files — this CLI is the single writer of
+# ~/.local/state/omastream/state.json.
+#
+# Plain bash + jq + gpu-screen-recorder. No daemons, no web views.
+
+set -u
+
+# omarchy:summary=Start/stop and configure the Omarchy live stream
+# omarchy:group=capture
+
+# ── paths ───────────────────────────────────────────────────────────────────
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_DIR="$STATE_HOME/omastream"
+STATE_FILE="$STATE_DIR/state.json"
+LOG_FILE="$STATE_DIR/stream.log"
+LOCK_FILE="$STATE_DIR/state.lock"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONFIG_DIR="$CONFIG_HOME/omastream"
+CONFIG_FILE="$CONFIG_DIR/config.env"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+SOCK_DIR="$RUNTIME_DIR/omastream"
+GSR_SOCK="$SOCK_DIR/gsr.sock"
+
+GSR_BIN="${GSR_BIN:-gpu-screen-recorder}"
+GSR_CLI="${GSR_CLI:-gsr-cli}"
+SHAPES=(circle 1:1 16:9)
+
+# ── misc helpers ────────────────────────────────────────────────────────────
+die() { echo "omastream: $*" >&2; exit "${2:-1}"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
+now_ms() { date +%s%3N; }
+mmss() { awk -v ms="${1:-0}" 'BEGIN { t=int(ms/1000); printf "%d:%02d:%02d", int(t/3600), int(t/60)%60, t%60 }'; }
+ensure_dirs() { mkdir -p "$STATE_DIR" "$SOCK_DIR" 2>/dev/null || true; }
+
+# ── config ──────────────────────────────────────────────────────────────────
+declare -A CONFIG=()
+load_config() {
+  CONFIG=()
+  [[ -r $CONFIG_FILE ]] || return 0
+  local line key value
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    [[ $line =~ ^[[:space:]]*# ]] && continue
+    [[ $line =~ ^[[:space:]]*$ ]] && continue
+    [[ $line == *=* ]] || continue
+    key="${line%%=*}"; key="${key// /}"
+    value="${line#*=}"
+    value="${value%$'\r'}"
+    value="${value%%#*}"        # strip inline comments: KEY=value  # note
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    value="${value% }"; value="${value# }"
+    CONFIG[$key]="$value"
+  done < "$CONFIG_FILE"
+}
+cfg() { local v="${CONFIG[$1]-}"; [[ -n $v ]] && echo "$v" || echo "${2:-}"; }
+cfg_bool() {
+  local v="${CONFIG[$1]-}"; v="${v:-$2}"
+  case "$(echo "$v" | tr '[:upper:]' '[:lower:]')" in
+    true|yes|1|on) echo true ;;
+    *) echo false ;;
+  esac
+}
+
+# ── state (atomic writes under one CLI-held lock) ────────────────────────────
+state_lock() { exec 9>>"$LOCK_FILE"; flock 9; }
+state_unlock() { flock -u 9; exec 9>&-; }
+state_json() { [[ -s $STATE_FILE ]] && cat "$STATE_FILE" 2>/dev/null || echo "{}"; }
+state_write() { # writes full object; caller holds the lock
+  local tmp="$STATE_FILE.tmp.$$"
+  printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$STATE_FILE"
+}
+state_merge() { # state_merge <partial-json>
+  local merged
+  state_lock
+  printf '%s\n' "$1" > "$STATE_DIR/.patch.$$"
+  merged=$(jq -c '. * input' <(state_json) "$STATE_DIR/.patch.$$" 2>/dev/null)
+  rm -f "$STATE_DIR/.patch.$$"
+  merged="${merged:-$1}"
+  state_write "$merged"
+  state_unlock
+}
+state_get() { state_json | jq -r "$1 // empty" 2>/dev/null; }
+
+# ── process ownership ────────────────────────────────────────────────────────
+gsr_pid_alive() {
+  local pid="${1:-}"
+  [[ $pid =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q "gpu-screen-recorder"
+  fi
+}
+gsr_ours_running() { pgrep -f "omastream/gsr.sock" >/dev/null 2>&1; }
+
+# ── capture target ───────────────────────────────────────────────────────────
+focused_monitor_name() {
+  if command -v hyprctl >/dev/null 2>&1; then
+    local n
+    n=$(hyprctl -j monitors 2>/dev/null | jq -r '[.[] | select(.focused)][0].name // empty' 2>/dev/null)
+    [[ -n $n ]] && { echo "$n"; return; }
+  fi
+  echo ""
+}
+resolve_capture() {
+  case "$(echo "$(cfg CAPTURE auto)" | tr '[:upper:]' '[:lower:]')" in
+    screen) echo "screen" ;;
+    monitor:*) echo "$(cfg CAPTURE)" ;;
+    *) local m; m="$(focused_monitor_name)"; [[ -n $m ]] && echo "monitor:$m" || echo "screen" ;;
+  esac
+}
+capture_monitor_name() { resolve_capture | sed 's#^monitor:##'; }
+
+# ── camera shapes and geometry ───────────────────────────────────────────────
+norm_shape() {
+  case "$(echo "$1" | tr -d '[:space:]')" in
+    circle|round) echo "circle" ;;
+    1:1|1x1|square) echo "1:1" ;;
+    16:9|16x9|wide) echo "16:9" ;;
+    *) echo "" ;;
+  esac
+}
+camera_shape() {
+  local s; s="$(norm_shape "$(state_get '.cam.shape' '')")"
+  [[ -n $s ]] && { echo "$s"; return; }
+  echo "$(norm_shape "$(cfg DEFAULT_CAM_SHAPE 16:9)")"
+}
+next_shape() {
+  local i n=${#SHAPES[@]}
+  for ((i = 0; i < n; i++)); do
+    [[ ${SHAPES[$i]} == "$1" ]] && { echo "${SHAPES[$(((i + 1) % n))]}"; return; }
+  done
+  echo "${SHAPES[0]}"
+}
+geom_key() { printf '%s@%s' "$1" "${2:-screen}"; }
+default_geom() {
+  case "$1" in
+    circle) echo '{"x":0.78,"y":0.68,"size":0.17}' ;;
+    1:1)    echo '{"x":0.75,"y":0.62,"size":0.20}' ;;
+    16:9)   echo '{"x":0.62,"y":0.58,"size":0.30}' ;;
+  esac
+}
+clamp_frac() { awk -v v="$1" -v cap="$2" 'BEGIN { if (v<0) v=0; if (v>cap) v=cap; printf "%.6f", v }'; }
+
+geom_for() { # materializes and echoes geometry for a (shape, screen) pair
+  local key g
+  key="$(geom_key "$1" "$2")"
+  g=$(state_json | jq -c --arg k "$key" '.cam.geometry[$k] // empty' 2>/dev/null)
+  if [[ -z $g ]]; then
+    g="$(default_geom "$1")"
+    state_merge "{\"cam\":{\"geometry\":{\"$key\":$g}}}"
+  fi
+  echo "$g"
+}
+
+cam_source_resolution() { # echoes "WxH" of the camera capture mode
+  local fmt=""
+  if command -v v4l2-ctl >/dev/null 2>&1; then
+    fmt=$(v4l2-ctl -d "$1" --get-fmt-video 2>/dev/null | awk -F': ' '/Width\/Height/ {print $2}')
+  fi
+  [[ $fmt =~ ^[0-9]+x[0-9]+$ ]] && { echo "$fmt"; return; }
+  echo "1280x720"
+}
+
+composite_opts() { # percent args so the stream window matches the bubble
+  local shape="$1" geom="$2"
+  local fit dev sw sh fx fy sz wpct hpct xpct ypct
+  fit="$(echo "$(cfg CAM_FIT aspect)" | tr '[:upper:]' '[:lower:]')"
+  dev="$(cfg CAM_DEVICE /dev/video0)"
+  sw="$(cam_source_resolution "$dev" | cut -dx -f1)"
+  sh="$(cam_source_resolution "$dev" | cut -dx -f2)"
+  fx=$(jq -r '.x' <<<"$geom"); fy=$(jq -r '.y' <<<"$geom"); sz=$(jq -r '.size' <<<"$geom")
+  wpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 }')
+  if [[ $fit == shape ]]; then
+    hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", (( $2 == "16:9" ) ? s * 9 / 16 : s) * 100 }' "$shape" 2>/dev/null || true)
+    hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 }')
+    [[ $shape == "16:9" ]] && hpct=$(awk -v s="$sz" 'BEGIN { printf "%.4f", s * 100 * 9 / 16 }')
+  else
+    if (( sw > 0 && sh > 0 )); then
+      hpct=$(awk -v s="$sz" -v w="$sw" -v h="$sh" 'BEGIN { printf "%.4f", s * 100 * h / w }')
+    else
+      hpct="$wpct"
+    fi
+  fi
+  xpct=$(awk -v f="$fx" 'BEGIN { printf "%.4f", f * 100 }')
+  ypct=$(awk -v f="$fy" 'BEGIN { printf "%.4f", f * 100 }')
+  echo "width=${wpct}%;height=${hpct}%;x=${xpct}%;y=${ypct}%"
+}
+
+resolve_audio() { # resolves system output + microphone into one -a value
+  local a sys mic mic_on
+  a="$(cfg AUDIO '')"
+  if [[ -n $a ]]; then echo "$a"; return; fi
+  sys="$(cfg AUDIO_SYSTEM auto)"
+  mic="$(cfg AUDIO_MIC auto)"
+  mic_on="$(cfg_bool MIC_ENABLED true)"
+  case "$(echo "$sys" | tr '[:upper:]' '[:lower:]')" in
+    ""|auto) sys="default_output" ;;
+    default_output|default_input|monitor) : ;;
+    device:*) : ;;
+    *) sys="device:$sys" ;;
+  esac
+  if [[ $mic_on != true ]]; then echo "$sys"; return; fi
+  case "$(echo "$mic" | tr '[:upper:]' '[:lower:]')" in
+    ""|auto|default) mic="default_input" ;;
+    default_output|default_input) : ;;
+    device:*) : ;;
+    *) mic="device:$mic" ;;
+  esac
+  echo "$sys|$mic"
+}
+rtmp_base() { echo "$(cfg RTMP_URL rtmp://a.rtmp.youtube.com/live2)"; }
+
+mask_key() { # hides the stream key in user-facing output (RTMP endpoints only)
+  local out="${1:-}"
+  [[ $out == rtmp://* ]] || { echo "$out"; return; }
+  sed -E 's#/[^/ ?&=]{4,}(/|#|$)#/<stream-key>#' <<<"$out"
+}
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$1" >> "$LOG_FILE" 2>/dev/null; }
+
+# ── start ────────────────────────────────────────────────────────────────────
+cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
+  ensure_dirs
+  load_config
+  need "$GSR_BIN"; need "$GSR_CLI"; need jq
+
+  local camflag="" file_out="" cpu_fallback
+  cpu_fallback="$(cfg_bool CPU_FALLBACK false)"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cam)          camflag="${2:-}"; shift 2 ;;
+      --file)         file_out="${2:-}"; shift 2 ;;
+      --cpu-fallback) cpu_fallback=true; shift ;;
+      *)              die "unknown start option: $1" ;;
+    esac
+  done
+
+  local output mode
+  if [[ -n $file_out ]]; then
+    output="$file_out"; mode="file"
+  else
+    local key
+    key="$(cfg STREAM_KEY '')"
+    if [[ -z $key ]]; then
+      die "no STREAM_KEY in $CONFIG_FILE
+set it:       omastream config stream-key '<your-youtube-key>'
+local check:  omastream test"
+    fi
+    if [[ $key == rtmp://* ]]; then output="$key"; else output="$(rtmp_base)/$key"; fi
+    mode="stream"
+  fi
+
+  if [[ "$(state_get '.streaming' false)" == "true" ]]; then
+    local curpid
+    curpid="$(state_get '.pid' 0)"
+    if gsr_pid_alive "$curpid"; then
+      die "already streaming (pid $curpid) — 'omastream stop' first"
+    fi
+  fi
+
+  # camera visibility for this session (--cam flag beats saved state)
+  local shape flip record visible
+  shape="$(camera_shape)"
+  flip="$(cfg_bool CAM_FLIP true)"
+  record="$(cfg_bool CAM_RECORD true)"
+  visible="$(state_get '.cam.visible' 'false')"
+  case "$camflag" in
+    on)
+      visible=true
+      state_merge "{\"cam\":{\"visible\":true,\"shape\":\"$shape\",\"device\":\"$(cfg CAM_DEVICE /dev/video0)\",\"flip\":$flip}}" ;;
+    off)
+      visible=false
+      state_merge '{"cam":{"visible":false}}' ;;
+  esac
+
+  # build the recorder command
+  local -a args=()
+  local capture screen_key
+  capture="$(resolve_capture)"
+  screen_key="$(capture_monitor_name)"
+  if [[ $visible == true && $record == true ]]; then
+    local geom opts fliparg
+    geom="$(geom_for "$shape" "$screen_key")"
+    opts="$(composite_opts "$shape" "$geom")"
+    if [[ $flip == true ]]; then fliparg=true; else fliparg=false; fi
+    args+=(-w "$capture|v4l2:$(cfg CAM_DEVICE /dev/video0);hflip=$fliparg;$opts")
+  else
+    args+=(-w "$capture")
+  fi
+  args+=(
+    -f "$(cfg FPS 30)"
+    -k "$(cfg VIDEO_CODEC h264)"
+    -bm cbr
+    -q "$(cfg VIDEO_BITRATE 4500)"
+    -c flv
+    -ac "$(cfg AUDIO_CODEC aac)"
+    -ab "$(cfg AUDIO_BITRATE 160)"
+    -a "$(resolve_audio)"
+    -o "$output"
+    -ipc "$GSR_SOCK"
+  )
+  [[ $cpu_fallback == true ]] && args+=(-fallback-cpu-encoding yes)
+  local extra
+  extra="$(cfg EXTRA_GSR_ARGS '')"
+  if [[ -n $extra ]]; then
+    local -a extraargs
+    read -r -a extraargs <<< "$extra"
+    args+=("${extraargs[@]}")
+  fi
+
+  # rotate a huge log
+  if [[ -f $LOG_FILE && $(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0) -gt 4194304 ]]; then
+    mv -f "$LOG_FILE" "$LOG_FILE.1"
+  fi
+  log "start requested ($mode)"
+
+  # spawn (direct child → the pid we track; no setsid wrapper to lose it)
+  "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  local pid=$!
+  local started_at
+  started_at="$(now_ms)"
+
+  # readiness wait — gsr-kms-server and the v4l2 source take a moment
+  local i ok=false
+  for ((i = 0; i < 200; i++)); do
+    if ! gsr_pid_alive "$pid"; then
+      tail -n 15 "$LOG_FILE" >&2
+      state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+      die "gpu-screen-recorder exited during startup (see $LOG_FILE)"
+    fi
+    if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
+      ok=true; break
+    fi
+    sleep 0.1
+  done
+  if [[ $ok != true ]]; then
+    tail -n 15 "$LOG_FILE" >&2
+    kill -INT "$pid" 2>/dev/null
+    state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+    die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
+  fi
+
+  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\"}"
+  log "running: pid=$pid mode=$mode"
+
+  # watchdog — flips state the moment the recorder dies, whatever the cause
+  "$0" __monitor "$pid" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+
+  echo "live (pid $pid) → $(mask_key "$output")"
+}
+
+# ── stop ────────────────────────────────────────────────────────────────────
+cmd_stop() {
+  ensure_dirs
+  local pid handled=false i
+  pid="$(state_get '.pid' 0)"
+
+  if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" stop >/dev/null 2>&1; then
+    handled=true
+    for ((i = 0; i < 100 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+  fi
+  if gsr_pid_alive "$pid"; then
+    handled=true
+    kill -INT "$pid" 2>/dev/null
+    for ((i = 0; i < 80 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+    if gsr_pid_alive "$pid"; then
+      kill -TERM "$pid" 2>/dev/null
+      for ((i = 0; i < 30 && gsr_pid_alive "$pid"; i++)); do sleep 0.1; done
+      gsr_pid_alive "$pid" && kill -KILL "$pid" 2>/dev/null
+    fi
+  fi
+  if [[ $handled != true ]]; then
+    if gsr_ours_running; then
+      handled=true
+      pkill -INT -f "omastream/gsr.sock" 2>/dev/null
+      for ((i = 0; i < 100 && gsr_ours_running; i++)); do sleep 0.1; done
+      gsr_ours_running && pkill -KILL -f "omastream/gsr.sock" 2>/dev/null
+    fi
+  fi
+  if [[ $handled != true && "$(state_get '.streaming' false)" != "true" ]]; then
+    die "nothing to stop"
+  fi
+
+  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms)}"
+  rm -rf "$SOCK_DIR" 2>/dev/null || true
+  log "stopped"
+  echo "stopped"
+}
+
+# ── status ──────────────────────────────────────────────────────────────────
+cmd_status() {
+  ensure_dirs
+  local raw pid streaming started mode out elapsed i json_flag=false check_flag=false
+  for a in "$@"; do
+    case "$a" in
+      --json)  json_flag=true ;;
+      --check) check_flag=true ;;
+      *)       die "unknown status option: $a" ;;
+    esac
+  done
+
+  raw="$(state_json)"
+  pid="$(jq -r '.pid // 0' <<<"$raw" 2>/dev/null)"
+  streaming="$(jq -r '.streaming // false' <<<"$raw" 2>/dev/null)"
+
+  if ! gsr_pid_alive "$pid"; then
+    if [[ $streaming == true ]]; then
+      state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+      streaming=false
+    fi
+  fi
+
+  started="$(jq -r '.startedAt // 0' <<<"$raw" 2>/dev/null)"
+  mode="$(jq -r '.mode // "stream"' <<<"$raw" 2>/dev/null)"
+  out="$(jq -r '.output // ""' <<<"$raw" 2>/dev/null)"
+  elapsed=0
+  if [[ $(now_ms) -gt started ]]; then elapsed=$(( $(date +%s%3N) - started )); fi
+
+  if [[ $streaming != true ]]; then
+    [[ $check_flag == true ]] && return 1
+    if [[ $json_flag == true ]]; then
+      echo '{"streaming":false}'
+    else
+      echo "not streaming"
+    fi
+    return 0
+  fi
+
+  if [[ $check_flag == true ]]; then
+    echo "streaming (pid $pid, $(mmss "$elapsed"))"
+    return 0
+  fi
+  if [[ $json_flag == true ]]; then
+    printf '{"streaming":true,"pid":%s,"elapsed":%s,"mode":"%s","output":"%s"}\n' \
+      "$pid" "$elapsed" "$mode" "$(mask_key "$out")"
+    return 0
+  fi
+  echo "streaming (pid $pid) — $(mmss "$elapsed") on $(mask_key "$out")"
+}
+
+# ── local pipeline test ─────────────────────────────────────────────────────
+cmd_test() {
+  ensure_dirs
+  local secs=8
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --secs) secs="${2:-8}"; [[ $secs =~ ^[0-9]+$ ]] || die "--secs needs a number"; shift 2 ;;
+      *) die "unknown test option: $1" ;;
+    esac
+  done
+  local out="$STATE_DIR/test.flv"
+  rm -f "$out"
+  echo "recording a ${secs}s local test file (no RTMP, no key needed)…"
+  cmd_start --file "$out" || return 1
+  sleep "$secs"
+  cmd_stop >/dev/null 2>&1
+  if [[ -s $out ]]; then
+    local sz
+    sz=$(stat -c %s "$out" 2>/dev/null || echo 0)
+    echo "test OK → $out ($(awk -v b="$sz" 'BEGIN { printf "%.1f MB", b/1048576 }'))"
+    echo "open it:  video-player $out"
+  else
+    echo "test file missing — see $LOG_FILE"
+    return 1
+  fi
+}
+
+# ── camera commands ─────────────────────────────────────────────────────────
+cmd_cam() { # cmd_cam <sub> [args…]
+  load_config
+  local sub="${1:-toggle}"
+  [[ $# -gt 0 ]] && shift
+  local cur shape flip nxt payload key shape2 screen x y size contentH capX capY
+  case "$sub" in
+    on|show)
+      state_merge '{"cam":{"visible":true}}'; echo "camera shown" ;;
+    off|hide)
+      state_merge '{"cam":{"visible":false}}'; echo "camera hidden" ;;
+    toggle)
+      cur="$(state_get '.cam.visible' 'false')"
+      if [[ $cur == true ]]; then
+        state_merge '{"cam":{"visible":false}}'; echo "camera hidden"
+      else
+        shape="$(camera_shape)"; flip="$(cfg_bool CAM_FLIP true)"
+        state_merge "{\"cam\":{\"visible\":true,\"shape\":\"$shape\",\"device\":\"$(cfg CAM_DEVICE /dev/video0)\",\"flip\":$flip}}"
+        echo "camera shown"
+      fi ;;
+    --shape)
+      shift 0; cmd_cam shape "$@" ;;
+    shape)
+      nxt="$(norm_shape "${1:-}")"
+      [[ -n $nxt ]] || die "unknown shape '${1:-}' — circle|1:1|16:9"
+      state_merge "{\"cam\":{\"shape\":\"$nxt\"}}"
+      echo "camera shape: $nxt" ;;
+    cycle-shape)
+      nxt="$(next_shape "$(camera_shape)")"
+      state_merge "{\"cam\":{\"shape\":\"$nxt\"}}"
+      echo "camera shape: $nxt" ;;
+    device)
+      [[ -n ${1:-} ]] || die "cam device <path>"
+      state_merge "{\"cam\":{\"device\":\"$1\"}}"
+      echo "camera device: $1" ;;
+    flip)
+      if [[ -n ${1:-} ]]; then
+        case "$1" in true|on) nxt=true ;; *) nxt=false ;; esac
+      else
+        nxt="$(cfg_bool CAM_FLIP true)"
+      fi
+      state_merge "{\"cam\":{\"flip\":$nxt}}"
+      echo "camera flip: $nxt" ;;
+    save) # cam save '<json>' — the QML bubble persists drag/resize through here
+      payload="${1:-}"
+      [[ -n $payload ]] || die "cam save needs JSON, e.g. omastream cam save '{\"x\":0.7,\"y\":0.6,\"size\":0.2,\"shape\":\"16:9\",\"screen\":\"HDMI-A-1\"}'"
+      x=$(jq -re '.x' <<<"$payload" 2>/dev/null)
+      y=$(jq -re '.y' <<<"$payload" 2>/dev/null)
+      size=$(jq -re '.size' <<<"$payload" 2>/dev/null)
+      screen="$(jq -re '.screen // ""' <<<"$payload" 2>/dev/null)"
+      shape=$(jq -re '.shape // ""' <<<"$payload" 2>/dev/null)
+      shape="$(norm_shape "$shape")"
+      [[ -n $shape ]] || shape="$(camera_shape)"
+      [[ $x =~ ^-?[0-9.]+$ && $y =~ ^-?[0-9.]+$ && $size =~ ^[0-9.]+$ ]] || die "cam save: x, y and size must be numbers"
+      [[ -n $screen ]] || die "cam save: screen name required"
+      awk -v s="$size" 'BEGIN { exit (s >= 0.05 && s <= 0.75 ? 0 : 1) }' || die "cam save: size must be 0.05–0.75 of screen width"
+      case "$shape" in
+        16:9) contentH="$(awk -v s="$size" 'BEGIN { printf "%.6f", s * 9 / 16 }')" ;;
+        *)    contentH="$size" ;;
+      esac
+      capX="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s }')"
+      capY="$(awk -v s="$contentH" 'BEGIN { printf "%.6f", 1 - s }')"
+      x="$(clamp_frac "$x" "$capX")"; y="$(clamp_frac "$y" "$capY")"
+      key="$(geom_key "$shape" "$screen")"
+      state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}}}"
+      printf '{"%s":{"x":%s,"y":%s,"size":%s}}\n' "$key" "$x" "$y" "$size"
+      ;;
+    status)
+      state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
+    *)
+      die "unknown camera command: '$sub' — on|off|toggle|shape|cycle-shape|save|device|flip|status" ;;
+  esac
+}
+
+# ── config file ─────────────────────────────────────────────────────────────
+create_config() {
+  mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
+  [[ -f $CONFIG_FILE ]] && return 0
+  cat > "$CONFIG_FILE" <<'ENV'
+# omastream — stream to YouTube Live. Keep this file private, never commit it.
+
+# ── YouTube Live ─────────────────────────────────────────────────────────────
+# Studio → Go live → Stream settings → Stream key. A full rtmp:// URL works too.
+STREAM_KEY=
+
+# ── video ────────────────────────────────────────────────────────────────────
+# h264  = YouTube RTMP ingest (VA-API QuickSync on Intel)
+# hevc  = try it if you like; YouTube RTMP may reject it
+VIDEO_CODEC=h264
+VIDEO_BITRATE=4500     # kbps, CBR — 4500 ≈ YouTube's recommended 1080p30
+FPS=30
+
+# ── audio (input / output device selects) ────────────────────────────────────
+AUDIO_SYSTEM=auto      # auto = current default speakers/headphones
+AUDIO_MIC=auto         # auto = current default microphone
+MIC_ENABLED=true       # false removes the mic track
+
+# ── camera ───────────────────────────────────────────────────────────────────
+CAM_DEVICE=/dev/video0
+CAM_FLIP=true          # mirrored (natural selfie view)
+CAM_RECORD=true        # composite the camera into the YouTube frame while shown
+CAM_FIT=aspect         # aspect = no distortion; shape = region follows bubble shape
+CAM_ON_START=false     # show the camera bubble whenever a stream starts
+DEFAULT_CAM_SHAPE=16:9 # circle | 1:1 | 16:9
+ENV
+  chmod 600 "$CONFIG_FILE"
+}
+
+cmd_config() {
+  local sub="${1:-}" key
+  case "$sub" in
+    "")
+      create_config; echo "$CONFIG_FILE" ;;
+    stream-key)
+      key="${1:-}"
+      [[ $key == "-" ]] && { read -r key; }
+      if [[ -z $key ]]; then
+        create_config
+        read -rs -p "stream key: " key; echo
+      fi
+      [[ -n $key && $key != *[\"\'$'\n'\\]* ]] || die "invalid stream key"
+      create_config
+      if grep -q '^STREAM_KEY=' "$CONFIG_FILE"; then
+        sed -i "s#^STREAM_KEY=.*#STREAM_KEY='$key'#" "$CONFIG_FILE"
+      else
+        printf "\nSTREAM_KEY='%s'\n" "$key" >> "$CONFIG_FILE"
+      fi
+      chmod 600 "$CONFIG_FILE"
+      echo "stream key saved in $CONFIG_FILE" ;;
+    open)
+      create_config && exec "${EDITOR:-vi}" "$CONFIG_FILE" ;;
+    print)
+      [[ -r $CONFIG_FILE ]] || die "no config yet — run: omastream config"
+      sed -E 's#^(STREAM_KEY=).*#\1<redacted>#' "$CONFIG_FILE" ;;
+    *) die "unknown config command: '$sub'" ;;
+  esac
+}
+
+# ── internal watchdog ───────────────────────────────────────────────────────
+__monitor() {
+  local pid="${1:-0}"
+  while gsr_pid_alive "$pid"; do sleep 1; done
+  if [[ "$(state_get '.streaming' false)" == "true" ]]; then
+    state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms)}"
+    rm -rf "$SOCK_DIR" 2>/dev/null || true
+    log "recorder exited unexpectedly; state cleared"
+  fi
+}
+
+usage() {
+  cat <<'USAGE'
+omastream — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → RTMP/YouTube)
+
+  omastream                          status summary
+  omastream start [--cam on|off] [--file PATH] [--cpu-fallback]
+                                     go live (STREAM_KEY) or record to PATH
+  omastream stop                     graceful stop (SIGINT closes the RTMP stream)
+  omastream toggle                   stop ↔ start
+  omastream status [--json|--check]  what the bar widget calls
+  omastream test [--secs N]          short local-file pipeline test, no key needed
+  omastream cam on|off|toggle        show / hide the camera bubble
+  omastream cam shape <circle|1:1|16:9>
+  omastream cam --shape <s>          same as "cam shape <s>"
+  omastream cam cycle-shape
+  omastream cam save '<json>'        the shell bubble persists drag/resize here
+  omastream cam status
+  omastream config [stream-key|open|print]
+
+files:
+  config:  ~/.config/omastream/config.env   (STREAM_KEY — private, never commit)
+  state:   ~/.local/state/omastream/state.json
+  log:     ~/.local/state/omastream/stream.log
+USAGE
+}
+
+main() {
+  local cmd="${1:-}"; [[ $# -gt 0 ]] && shift
+  case "$cmd" in
+    "")             cmd_status ;;
+    start|stream)   cmd_start "$@" ;;
+    stop)           cmd_stop ;;
+    toggle)
+      if [[ "$(state_get '.streaming' false)" == "true" ]]; then
+        cmd_stop
+      else
+        load_config
+        if [[ "$(cfg_bool CAM_ON_START false)" == "true" ]]; then
+          cmd_start --cam on
+        else
+          cmd_start
+        fi
+      fi ;;
+    status)         cmd_status "$@" ;;
+    test)           cmd_test "$@" ;;
+    cam)            load_config; cmd_cam "$@" ;;
+    config)         cmd_config "$@" ;;
+    help|-h|--help) usage ;;
+    __monitor)      __monitor "${1:-}" ;;
+    *) die "unknown command: '$cmd' — see omastream --help" ;;
+  esac
+}
+
+main "$@"
