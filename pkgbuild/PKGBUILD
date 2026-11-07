@@ -1,0 +1,24 @@
+pkgname=omastream
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Stream to YouTube Live from Omarchy — gpu-screen-recorder encode, camera bubble, one honest window'
+arch=('x86_64' 'aarch64')
+license=('MIT')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'libpulse' 'gpu-screen-recorder')
+makedepends=('gcc' 'make')
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  ./bin/build
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 build/omastream "$pkgdir/usr/bin/omastream"
+  install -Dm755 cli/omastream "$pkgdir/usr/bin/omastream-cli"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/omastream.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omastream.svg"
+  install -Dm644 "$startdir/omastream.desktop" "$pkgdir/usr/share/applications/omastream.desktop"
+}

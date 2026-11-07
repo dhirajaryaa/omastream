@@ -699,7 +699,7 @@ __monitor() {
 
 usage() {
   cat <<'USAGE'
-omastream — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → RTMP/YouTube)
+omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → RTMP/YouTube)
 
   omastream-cli                          status summary
   omastream-cli start [--cam on|off] [--file PATH] [--cpu-fallback]

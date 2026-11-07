@@ -12,3 +12,7 @@ run/
 # editor noise
 .Trash-*/
 *.swp
+/build/
+/pkgbuild/pkg/
+/pkgbuild/src/
+*.pkg.tar.*

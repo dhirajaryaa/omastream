@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Omastream
+GenericName=YouTube Live Streamer
+Comment=Go live on YouTube from your screen — start, stop and dial in the camera
+Exec=omastream
+Icon=omastream
+Terminal=false
+Categories=Network;AudioVideo;Video;
+StartupWMClass=omastream
+Keywords=stream;youtube;live;omastream;

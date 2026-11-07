@@ -15,7 +15,7 @@ import qs.Commons
 // where it is parked, click-through everywhere except its own box.
 //
 // Shapes: circle / 1:1 / 16:9. Drag to move, grab the bottom-right grip to
-// resize (the shape ratio is kept). Persisted through `omastream cam save` —
+// resize (the shape ratio is kept). Persisted through `omastream-cli cam save` —
 // the CLI stays the single state writer.
 //
 // While gsr holds the camera for the stream the device is busy: the preview
