@@ -35,12 +35,15 @@ BarWidget {
     onLoadFailed: root.load("")
   }
 
-  // inotify can miss the CLI's atomic rename; slow-poll closes the gap.
+  // Keep live bar synced with state.json heartbeat
   Timer {
-    interval: 10000
+    interval: 1000
     running: true
     repeat: true
-    onTriggered: stateFile.reload()
+    onTriggered: {
+      stateFile.reload()
+      if (root.streaming) root.updateElapsed()
+    }
   }
 
   Timer {
