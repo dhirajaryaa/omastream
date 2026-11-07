@@ -19,3 +19,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Portions of the Qt theming and translation scaffolding (`src/theme.*`,
+`src/translator.*`) are derived from Omacut and Monologue by David
+Heinemeier Hansson, used under the MIT License
+(https://github.com/basecamp/omarchy and its bundled app templates).

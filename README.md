@@ -1,113 +1,155 @@
-# omastream
+# Omastream
 
-Zero-lag YouTube Live streaming for Omarchy, built the Omarchy way: **gpu-screen-recorder** does the hardware encode (VA-API / Intel QuickSync), a tiny **Quickshell plugin** draws your camera bubble and the live bar, and one **CLI** owns everything — `omastream`.
+Stream your screen to YouTube Live from Omarchy — one window, GPU encode
+(gpu-screen-recorder → VA-API), a draggable camera bubble, and a CLI that
+still works when you don't feel like clicking.
 
-No Electron. No web views. A 2 GB Radeon-free Ivy Bridge laptop can stream 1080p30.
+<p align="center">
+  <img src="docs/screenshot.png" alt="The Omastream window — status card with the go-live button, camera bubble controls and settings" width="620">
+</p>
 
-```
-screen ──┐
-         ├─ gpu-screen-recorder ─flv/CBR h264→ rtmp://a.rtmp.youtube.com/live2
-camera ──┘
-```
+The app is the main surface: press **Space** to go live, press it again to
+stop. Everything it does it does through `omastream-cli`, the engine —
+quick settings (`config set`) require... nothing more. No Electron, no web
+view: a native Qt Quick app that follows your Omarchy theme accent, needs
+about 10 MB of RAM, and leaves the CPU heavy lifting to your GPU.
 
-## What you get
-
-- **Camera bubble** — draggable, resizable self-view in three shapes: `circle`, `1:1`, `16:9`. Hover it for the shape pill (switch shape / hide) and a corner grip to resize.
-- **LIVE bar badge** — red, pulsing, with elapsed time. Click stops the stream, middle-click toggles the camera, right-click opens YouTube's Live Control Room.
-- **CLI switchgear** — every control scriptable: `omastream start|stop|toggle|status|cam|test`.
-- **One honest config file** — `~/.config/omastream/config.env`. Stream key, audio in/out devices, camera shape, codec and bitrate. That's it.
-- **Capture-safe** — the styled bubble is excluded from capture, so YouTube never sees your UI twice: gpu-screen-recorder composites the raw camera into the stream at the same coordinates the bubble occupies.
+---
 
 ## Install
 
-Assumes a running Omarchy (Hyprland + omarchy shell + gpu-screen-recorder).
-
-```bash
-git clone https://github.com/dhirajaryaa/omastream
-cd omastream
-./install.sh          # CLI → ~/.local/bin, plugin, icons, launchers
-omarchy restart shell # spawn the bubble service + LIVE badge
-```
-
-Dev shortcut (edits take effect without re-copying): `./install.sh --link`.
-
-### Intel setup older than Haswell
-
-3rd-gen (Ivy Bridge) cores use the legacy VAAPI driver. If `omastream test` fails on encode:
-
-```bash
-sudo pacman -S libva-intel-driver libva-utils
-vainfo                # should report i965 + H264 entrypoints
-```
-
-Stuck without sudo? `omastream start --cpu-fallback` streams anyway (soft encode, soft battery).
-
-## Go live
-
-```bash
-omastream config stream-key    # paste your YouTube stream key (kept local, chmod 700)
-omastream test                 # 8 s local dry run → ~/.local/state/omastream/test.flv
-omastream start                # live. the bar turns red.
-```
-
-In YouTube Studio, start the broadcast and set *Stream key management* to "use the stream key"; once your ingest turns green, viewers see the screen.
-
-## CLI
-
-| command                              | what it does                                        |
-|--------------------------------------|-----------------------------------------------------|
-| `omastream` / `status`               | am I live? (uptime, output masked)                  |
-| `status --json`                      | machine-readable state (bars and scripts)           |
-| `start`                              | go live using `STREAM_KEY`                          |
-| `start --file out.flv`               | record to a file instead (dry run)                  |
-| `start --cpu-fallback`               | force software encode (VA-API unavailable)          |
-| `start --cam on / --cam off`         | stream with/without the camera composited           |
-| `stop`                               | graceful stop — SIGINT, stream closes clean         |
-| `toggle`                             | stop ↔ start                                        |
-| `cam on / off / toggle`              | show / hide the camera bubble                       |
-| `cam shape circle \| 1:1 \| 16:9`    | set the bubble shape                                |
-| `cam cycle-shape`                    | next shape                                          |
-| `cam save '<json>'`                  | persist geometry (the bubble calls this when moved) |
-| `config`                             | print the config path (write it to change settings) |
-| `config stream-key`                  | set the stream key from a prompt                    |
-| `test`                               | 8 s local capture, no key needed, then inspect it   |
-
-## Config quick reference (`~/.config/omastream/config.env`)
-
 ```sh
-STREAM_KEY=            # or a full rtmp:// URL
-VIDEO_CODEC=h264       # h264 for YouTube ingest; hevc is best-effort
-VIDEO_BITRATE=4500     # kbps CBR ≈ YouTube's 1080p30 recommendation
-FPS=30
-
-AUDIO_SYSTEM=auto      # auto = default output (speakers/headphones); or an exact sink name
-AUDIO_MIC=auto         # auto = default microphone
-MIC_ENABLED=true       # false → screen audio only
-
-CAM_DEVICE=/dev/video0
-CAM_FLIP=true          # mirrored selfie view
-CAM_RECORD=true        # composite the camera into the stream while the bubble shows
-CAM_ON_START=false     # pop the bubble on every stream start
-DEFAULT_CAM_SHAPE=16:9
+git clone git@github.com:dhirajaryaa/omastream.git
+cd omastream
+./install.sh
 ```
 
-## The camera bubble, precisely
+`install.sh` builds the app, installs it user-level (no sudo):
 
-- Geometry is stored as fractions of the display, `shape@screen` keyed, so the same numbers drive both the on-screen bubble and the in-stream composite. Drag or resize commits through `omastream cam save`; only when the CLI accepts is the bubble relaxed.
-- While you stream, gpu-screen-recorder holds `/dev/videoN` exclusively, so the preview pauses: the bubble shows a themed **LIVE** placeholder until the stream ends. That's a feature of the single-device design — for simultaneous preview, install [v4l2loopback](https://github.com/umlaeute/v4l2loopback) so two readers can share the camera, then point `CAM_DEVICE` at the loopback device it creates.
-- One bubble lives per monitor; it parks on the display where you left it (or, on first show, the focused one).
+| What | Where |
+| --- | --- |
+| App (the window) | `~/.local/bin/omastream` |
+| CLI (the engine) | `~/.local/bin/omastream-cli` |
+| Launcher entry + icon | `~/.local/share/applications/omastream.desktop`, hicolor icons |
+| Shell bubble + LIVE badge plugin | `~/.config/omarchy/plugins/dhirajarya.omastream/` |
+
+Then open your launcher (**Super + Space**) and type **Omastream**.
+
+> The old `omastream-start` / `omastream-stop` launcher scripts are removed by
+> the installer — the app and its Space key replace them.
+
+Arch package route instead (asks for the sudo password): `./install.sh --package`.
+
+## Go live in 60 seconds
+
+1. **Open Omastream** from the launcher.
+2. **Paste your stream key.** In YouTube: Studio → **Go live** → Stream
+   settings → copy the **stream key** — paste it in the app's *YouTube stream
+   key* field. It's stored locally in `~/.config/omastream/config.env`
+   (file is `chmod 700`, never committed, never logged).
+   Prefer the terminal? `omastream-cli config stream-key` (paste, Enter) or
+   `omastream-cli config set STREAM_KEY 'xxxx-xxxx-xxxx'`.
+3. Pick **System audio** (desktop sound), **Microphone**, **codec** and
+   **bitrate** in Settings — honest defaults for 1080p are already set.
+4. Press **Space** (or the big play button). The status card turns red with
+   a live clock; YouTube Studio reports "Excellent connectivity".
+5. Press **Space** again to stop. The stream ends gracefully (RTMP close,
+   final frames intact).
+
+Not sure the capture works before showtime? Press **T** — *Test capture*
+records an 8 s local file (`/tmp/omastream-test.flv`), nothing is uploaded,
+and it stops itself.
+
+## The camera bubble
+
+Toggle with the **Camera bubble** switch or **C**:
+
+- **Drag** it anywhere — hold the corner grip to resize; the shape ratio is
+  kept and both the on-screen bubble and the in-stream composite stay in step.
+- **Shapes:** Circle · 1:1 · 16:9 (the selected one wears your Omarchy accent).
+- **Mirror** — the natural "selfie view" for your front camera.
+- While you're live, the preview pauses into a **LIVE** placeholder — that's
+  by design: the camera device is busy being composited into the YouTube
+  frame.
+
+> If the camera refuses (`EBUSY`) after a stream ends, close the bubble once
+> (C) and reopen; some laptop drivers hold the device a beat longer.
+
+## Settings reference
+
+| Setting | What it does |
+| --- | --- |
+| **YouTube stream key** | The ingest key (or a full `rtmp://` URL). Local only. |
+| **System audio** | Desktop sound: `Default output` follows your current speakers, plus every separate output device PulseAudio/PipeWire reports. |
+| **Microphone** | `Default microphone` follows your default; other entries are your real input devices. The toggle off records **no** mic track at all. |
+| **Video codec** | `h264` — YouTube RTMP ingest, VA-API QuickSync. `hevc` is there to try, but YouTube RTMP may reject it. |
+| **Bitrate (CBR)** | 3000 / 4500 / 6000 / 8000 / 9000 kbps. 1080p30 → **4500**, 1080p60 → 6000–9000. |
+| **Mirror** | Flips the camera horizontally. |
+| **Camera bubble** | Show / hide the floating self-view. |
+
+## Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `Space` | Go live / stop |
+| `C` | Show or hide the camera bubble |
+| `T` | 8 second test capture — local file, no upload |
+| `?` | Show or hide the shortcuts overlay |
+| `Q` | Quit — asks first if a stream is running |
+
+Wayland-only, in-app. The shell plugin adds its own: **click** the LIVE badge
+to stop the stream, **middle-click** to toggle the camera bubble.
+
+## `omastream-cli` — the engine
+
+Everything the window does, scriptable:
+
+| Command | What it does |
+| --- | --- |
+| `omastream-cli` | status summary |
+| `start [--cam on\|off] [--file PATH] [--cpu-fallback]` | go live (STREAM_KEY), or record to a file |
+| `stop` | graceful stop — SIGINT closes the RTMP stream cleanly |
+| `toggle` | stop ↔ start |
+| `status` / `status --json` / `status --check` | what the bar widget calls |
+| `test [--secs N]` | local-file pipeline test, no key needed |
+| `cam on\|off\|toggle` | show / hide the bubble |
+| `cam shape <circle\|1:1\|16:9>` · `cam cycle-shape` | set or cycle the bubble shape |
+| `cam save '<json>'` | the shell bubble persists drag/resize here |
+| `cam status` | bubble state |
+| `config [stream-key\|set KEY VALUE\|open\|print]` | edit `config.env` |
+
+## Files
+
+| Path | What lives there |
+| --- | --- |
+| `~/.config/omastream/config.env` | settings — stream key, devices, codec… (`chmod 700`) |
+| `~/.local/state/omastream/state.json` | runtime state — what the app, bubble and bar all watch |
+| `~/.local/state/omastream/stream.log` | gpu-screen-recorder's log |
+| `~/.config/omarchy/plugins/dhirajarya.omastream/` | camera bubble + LIVE bar badge |
 
 ## Troubleshooting
 
-- **Bar shows nothing when live** — restart the shell (`omarchy restart shell`) then re-check `omastream status`.
-- **Encode errors with `libva intel: iHD/i965 init failed`** — see Intel setup above, or run `--cpu-fallback`.
-- **Stream green but no video** — check YouTube's *Stream key management* is using the key, and that Studio's preview is "off" unless the dashboard is open.
-- **Test file missing** — read the log tail: `~/.local/state/omastream/stream.log`.
+- **"test" fails with VA-API errors on older Intel** — pre-Haswell (3rd gen
+  Ivy Bridge included) uses the legacy driver:
+  `sudo pacman -S libva-intel-driver libva-utils`, then retry. No sudo?
+  `omastream-cli start --cpu-fallback` streams anyway with software encode.
+- **Capture can't find the screen while the session is locked** — expected:
+  the Wayland portal refuses while the screen is locked. Unlock, retry.
+- **The camera shows EBUSY** — see the bubble section above.
+- **Bar badge missing / bubble gone after updates** — restart the shell:
+  `omarchy restart shell` (refuses while locked, politely).
+- **Still stuck** — read `~/.local/state/omastream/stream.log`.
 
-## Safety
+## Uninstall
 
-The stream key lives only in `~/.config/omastream`, `chmod 700`, and every human-facing CLI output masks it. Nothing in this repo will ever read your browser cookies; the tool speaks raw RTMP like any encoder would.
+```sh
+./install.sh --uninstall
+```
+
+Removes the app, CLI, launcher entry, icons and plugin. Your config and
+recordings stay put.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The Qt theme/translation scaffolding is
+adapted from Omacut and Monologue by David Heinemeier Hansson (MIT).
