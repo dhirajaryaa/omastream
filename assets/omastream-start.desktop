@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Omastream — Start Streaming
+GenericName=YouTube Live Streamer
+Comment=Go live on YouTube from your screen (gpu-screen-recorder)
+Exec=omastream start
+Icon=omastream
+Terminal=false
+Categories=Network;AudioVideo;Video;
+Keywords=stream;youtube;live;omastream;

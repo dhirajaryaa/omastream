@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Omastream — Stop Streaming
+GenericName=YouTube Live Streamer
+Comment=Stop the running omastream stream (closes the RTMP connection)
+Exec=omastream stop
+Icon=omastream
+Terminal=false
+Categories=Network;AudioVideo;Video;
+NoDisplay=false
