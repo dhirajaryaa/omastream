@@ -19,7 +19,6 @@ class Backend : public QObject {
     Q_PROPERTY(bool camVisible READ camVisible NOTIFY stateChanged)
     Q_PROPERTY(QString camShape READ camShape NOTIFY stateChanged)
     Q_PROPERTY(bool camFlip READ camFlip NOTIFY stateChanged)
-    Q_PROPERTY(bool barHidden READ barHidden NOTIFY barHiddenChanged)
     Q_PROPERTY(bool starting READ starting NOTIFY busyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString streamKey READ streamKey NOTIFY configChanged)
@@ -44,7 +43,6 @@ public:
     bool camVisible() const { return m_camVisible; }
     QString camShape() const { return m_camShape; }
     bool camFlip() const { return m_camFlip; }
-    bool barHidden() const { return m_barHidden; }
     bool starting() const { return m_starting; }
     // What the user reads when something goes wrong: a command's own stderr
     // leads; the recorder's watchdog reason (written to state.json by the CLI)
@@ -67,9 +65,6 @@ public:
     Q_INVOKABLE void toggleStream();
     Q_INVOKABLE void startStream();
     Q_INVOKABLE void stopStream();
-    Q_INVOKABLE void toggleBar();
-    Q_INVOKABLE void setBarHidden(bool hidden);
-    Q_INVOKABLE void updateBarHidden();
     Q_INVOKABLE void startTest();
     Q_INVOKABLE void openTestFile();
     Q_INVOKABLE void toggleCam();
@@ -90,7 +85,6 @@ signals:
     void audioDevicesChanged();
     void busyChanged();
     void lastErrorChanged();
-    void barHiddenChanged();
 
 private:
     QString basePath(const char *xdgName, const char *fallback);
@@ -101,14 +95,14 @@ private:
     QString cliPath() const;
     void applyState(const QJsonObject &state);
 
-    QString m_statePath, m_configPath, m_cli, m_barOffTogglePath;
+    QString m_statePath, m_configPath, m_cli;
     QFileSystemWatcher m_watcher;
     QTimer m_debounce, m_elapsedTimer;
 
     bool m_streaming = false;
     long long m_startedAt = 0;
     QString m_elapsed, m_mode, m_output;
-    bool m_camVisible = false, m_starting = false, m_camFlip = true, m_barHidden = false;
+    bool m_camVisible = false, m_starting = false, m_camFlip = true;
     QString m_camShape = "16:9", m_stateError, m_commandError;
     QVariantMap m_config;
     QVariantList m_systemOutputs, m_microphones;

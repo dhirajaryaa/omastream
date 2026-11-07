@@ -21,7 +21,6 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     const QString configHome = basePath("XDG_CONFIG_HOME", "/.config");
     m_configPath = !configPath.isEmpty() ? configPath : configHome + "/omastream/config.env";
     m_cli = !cli.isEmpty() ? cli : cliPath();
-    m_barOffTogglePath = stateHome + "/omarchy/toggles/bar-off";
 
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
@@ -30,23 +29,16 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     connect(&m_debounce, &QTimer::timeout, this, [this] {
         reloadState();
         reloadConfig();
-        updateBarHidden();
     });
 
     reloadState();
     reloadConfig();
-    updateBarHidden();
     refreshAudioDevices();
 
-    const QString togglesDir = stateHome + "/omarchy/toggles";
-    if (QDir(togglesDir).exists())
-        armWatch(togglesDir);
-    armWatch(m_barOffTogglePath);
-
-    // The clock label ticks locally; the state file only carries startedAt.
-    m_elapsedTimer.setInterval(1000);
+    // Ticks elapsed time and syncs state continuously
+    m_elapsedTimer.setInterval(500);
     connect(&m_elapsedTimer, &QTimer::timeout, this, [this] {
-        updateBarHidden();
+        reloadState();
         if (m_streaming) {
             m_elapsed = formatElapsed(m_startedAt, QDateTime::currentMSecsSinceEpoch());
             emit stateChanged();
@@ -101,6 +93,9 @@ QString Backend::cliPath() const {
     const QString installed = QStandardPaths::findExecutable("omastream-cli");
     if (!installed.isEmpty())
         return installed;
+    const QString homeBin = QDir::homePath() + "/.local/bin/omastream-cli";
+    if (QFile::exists(homeBin))
+        return homeBin;
     const QDir checkout = QDir(QCoreApplication::applicationDirPath() + "/..");
     return checkout.absoluteFilePath("cli/omastream");
 }
@@ -270,6 +265,8 @@ void Backend::runCommand(const QStringList &args, const QString &niceError) {
     connect(proc, &QProcess::finished, this, [this, niceError](int code, QProcess::ExitStatus status) {
         auto *proc = qobject_cast<QProcess *>(sender());
         if (code != 0 || status != QProcess::NormalExit) {
+            m_starting = false;
+            emit busyChanged();
             QString stderrText = QString::fromUtf8(proc->readAllStandardError()).trimmed();
             if (stderrText.isEmpty())
                 stderrText = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
@@ -286,6 +283,8 @@ void Backend::runCommand(const QStringList &args, const QString &niceError) {
             emit lastErrorChanged();
         }
         proc->deleteLater();
+        reloadState();
+        reloadConfig();
         // Settings writes and camera commands land on disk fast; pull them in.
         QTimer::singleShot(150, this, [this] {
             reloadState();
@@ -315,29 +314,6 @@ void Backend::startStream() {
 
 void Backend::stopStream() {
     runCommand({"stop"}, tr("The recorder refused to stop; check the log."));
-}
-
-void Backend::updateBarHidden() {
-    const bool hidden = QFile::exists(m_barOffTogglePath);
-    if (m_barHidden != hidden) {
-        m_barHidden = hidden;
-        emit barHiddenChanged();
-    }
-}
-
-void Backend::toggleBar() {
-    QProcess::startDetached("omarchy-toggle-bar", {});
-    QTimer::singleShot(150, this, [this] {
-        updateBarHidden();
-    });
-}
-
-void Backend::setBarHidden(bool hidden) {
-    if (m_barHidden != hidden) {
-        QProcess::startDetached("omarchy-toggle-bar", {hidden ? "on" : "off"});
-        m_barHidden = hidden;
-        emit barHiddenChanged();
-    }
 }
 
 void Backend::startTest() {

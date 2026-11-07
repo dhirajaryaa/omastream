@@ -5,11 +5,11 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 
-// Omastream LIVE badge — hidden until a stream is running.
+// Omastream LIVE badge — appears on the bar only while live streaming.
 //
-// Left-click opens a quick control popup (details, stop button, app/camera shortcuts),
-// middle-click toggles camera bubble, right-click opens YouTube Studio.
-// Reads ~/.local/state/omastream/state.json with FileView and watchChanges.
+// Left-click opens a compact popup with Stop Stream and Webcam toggle,
+// middle-click directly toggles the camera bubble, right-click opens YouTube Studio.
+// Synchronizes state with ~/.local/state/omastream/state.json.
 BarWidget {
   id: root
   moduleName: "dhirajarya.omastream"
@@ -20,6 +20,7 @@ BarWidget {
 
   property var state: ({})
   readonly property bool streaming: state.streaming === true
+  readonly property bool camVisible: state && state.cam ? state.cam.visible === true : false
   readonly property string mode: state && state.mode ? String(state.mode) : "stream"
 
   property string elapsed: "0:00"
@@ -46,7 +47,7 @@ BarWidget {
 
   // Keep live bar synced with state.json heartbeat
   Timer {
-    interval: 1000
+    interval: root.streaming ? 250 : 500
     running: true
     repeat: true
     onTriggered: {
@@ -104,6 +105,7 @@ BarWidget {
   Process {
     id: cmdProc
     onExited: {
+      stateFile.reload()
       if (root.service && typeof root.service.reloadState === "function") {
         root.service.reloadState()
       }
@@ -111,27 +113,13 @@ BarWidget {
   }
 
   Process {
-    id: toggleBarProc
-    command: ["omarchy-toggle-bar"]
-  }
-
-  Process {
     id: openStudio
     command: ["xdg-open", "https://studio.youtube.com"]
   }
 
-  Process {
-    id: openApp
-    command: ["omastream"]
-  }
-
   function runCmd(args) {
-    if (root.bar && typeof root.bar.run === "function") {
-      root.bar.run([omastreamBin].concat(args).join(" "))
-    } else {
-      cmdProc.command = [omastreamBin].concat(args)
-      cmdProc.running = true
-    }
+    cmdProc.command = [omastreamBin].concat(args)
+    cmdProc.running = true
   }
 
   Rectangle {
@@ -192,11 +180,11 @@ BarWidget {
 
     onClicked: (mouse) => {
       if (mouse.button === Qt.MiddleButton) {
-        root.runCmd(["cam", "toggle"]) // middle-click: show/hide camera
+        root.runCmd(["cam", "toggle"])
       } else if (mouse.button === Qt.RightButton) {
-        openStudio.running = true // right-click: YouTube Studio
+        openStudio.running = true
       } else {
-        root.popupOpen = !root.popupOpen // left-click: toggle popup
+        root.popupOpen = !root.popupOpen
       }
     }
     onEntered: if (root.bar) root.bar.showTooltip(root, "omastream — click for controls, middle-click toggles camera")
@@ -209,21 +197,21 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen && root.streaming
-    contentWidth: popup.fittedContentWidth(Style.space(260))
+    contentWidth: popup.fittedContentWidth(Style.space(190))
     contentHeight: popup.fittedContentHeight(popupCol.implicitHeight)
 
     Column {
       id: popupCol
       anchors.fill: parent
-      spacing: Style.space(10)
+      spacing: Style.space(8)
 
-      // ── Header: LIVE Status & Title ─────────────────────────────────
+      // ── Header: LIVE Status & Elapsed Timer ─────────────────────────
       Row {
         width: parent.width
         spacing: Style.space(8)
 
         Rectangle {
-          width: Style.space(10)
+          width: Style.space(8)
           height: width
           radius: width / 2
           color: Color.urgent
@@ -237,27 +225,14 @@ BarWidget {
           }
         }
 
-        Column {
-          width: parent.width - Style.space(20)
-          spacing: Style.space(2)
-
-          Text {
-            textFormat: Text.PlainText
-            text: root.mode === "file" ? "Local Test Recording" : "YouTube Live Stream"
-            color: root.bar ? root.bar.foreground : "white"
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.subtitle
-            font.bold: true
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            text: (root.mode === "file" ? "Recording · " : "Live · ") + root.elapsed
-            color: Color.urgent
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
-          }
+        Text {
+          textFormat: Text.PlainText
+          text: (root.mode === "file" ? "REC · " : "LIVE · ") + root.elapsed
+          color: Color.urgent
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+          anchors.verticalCenter: parent.verticalCenter
         }
       }
 
@@ -268,46 +243,7 @@ BarWidget {
         color: Qt.rgba(255, 255, 255, 0.08)
       }
 
-      // ── Details ─────────────────────────────────────────────────────
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
-
-        Row {
-          spacing: Style.space(6)
-          Text {
-            text: "Destination:"
-            color: Qt.darker(root.bar ? root.bar.foreground : "white", 1.8)
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-          Text {
-            text: root.mode === "file" ? "Local test (test.flv)" : "YouTube RTMP"
-            color: root.bar ? root.bar.foreground : "white"
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-        }
-
-        Row {
-          spacing: Style.space(6)
-          Text {
-            text: "Elapsed:"
-            color: Qt.darker(root.bar ? root.bar.foreground : "white", 1.8)
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-          Text {
-            text: root.elapsed
-            color: root.bar ? root.bar.foreground : "white"
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-        }
-      }
-
-      // ── Prominent Stop Button ───────────────────────────────────────
+      // ── Stop Stream Button ──────────────────────────────────────────
       Button {
         width: parent.width
         text: root.mode === "file" ? "Stop Recording" : "Stop Stream"
@@ -323,42 +259,15 @@ BarWidget {
         }
       }
 
-      // ── Action Buttons Row ──────────────────────────────────────────
-      Row {
+      // ── Webcam Toggle Button ────────────────────────────────────────
+      Button {
         width: parent.width
-        spacing: Style.space(6)
-
-        Button {
-          width: (parent.width - Style.space(12)) / 3
-          text: "Camera"
-          bordered: true
-          horizontalPadding: Style.spacing.controlPaddingX
-          verticalPadding: Style.spacing.controlPaddingY
-          onClicked: root.runCmd(["cam", "toggle"])
-        }
-
-        Button {
-          width: (parent.width - Style.space(12)) / 3
-          text: "Hide Bar"
-          bordered: true
-          horizontalPadding: Style.spacing.controlPaddingX
-          verticalPadding: Style.spacing.controlPaddingY
-          onClicked: {
-            root.popupOpen = false
-            toggleBarProc.running = true
-          }
-        }
-
-        Button {
-          width: (parent.width - Style.space(12)) / 3
-          text: "Omastream"
-          bordered: true
-          horizontalPadding: Style.spacing.controlPaddingX
-          verticalPadding: Style.spacing.controlPaddingY
-          onClicked: {
-            root.popupOpen = false
-            openApp.running = true
-          }
+        text: root.camVisible ? "Hide Webcam" : "Show Webcam"
+        bordered: true
+        horizontalPadding: Style.spacing.controlPaddingX
+        verticalPadding: Style.spacing.controlPaddingY
+        onClicked: {
+          root.runCmd(["cam", "toggle"])
         }
       }
     }

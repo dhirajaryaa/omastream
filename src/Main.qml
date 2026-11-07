@@ -26,7 +26,6 @@ ApplicationWindow {
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: backend.toggleStream() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: backend.toggleCam() }
-    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; onActivated: backend.toggleBar() }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: win.close() }
     Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: if (win.settingsOpen) win.settingsOpen = false }
 
@@ -461,64 +460,6 @@ ApplicationWindow {
                         id: camSwitch
                         checked: backend.camVisible
                         onToggled: backend.toggleCam()
-                    }
-                }
-            }
-
-            // Card 4: Top bar
-            Rectangle {
-                Layout.fillWidth: true
-                height: 44
-                radius: 8
-                color: "#1a1d2b"
-                border.width: 1
-                border.color: "#232638"
-
-                RowLayout {
-                    anchors {
-                        fill: parent
-                        leftMargin: 12
-                        rightMargin: 12
-                    }
-                    spacing: 10
-
-                    Image {
-                        source: "qrc:/icons/monitor.svg"
-                        sourceSize: Qt.size(24, 24)
-                        Layout.preferredWidth: 16
-                        Layout.preferredHeight: 16
-                        fillMode: Image.PreserveAspectFit
-                        opacity: !backend.barHidden ? 0.9 : 0.4
-                    }
-
-                    Text {
-                        text: qsTr("Top bar")
-                        color: !backend.barHidden ? "#d8dae5" : "#6f738a"
-                        font.pixelSize: 13
-                    }
-
-                    Rectangle {
-                        radius: 4
-                        color: "#24283c"
-                        implicitWidth: barPillText.implicitWidth + 8
-                        implicitHeight: 18
-
-                        Text {
-                            id: barPillText
-                            anchors.centerIn: parent
-                            text: backend.barHidden ? qsTr("Hidden") : qsTr("Visible")
-                            color: "#8e93aa"
-                            font.family: "JetBrains Mono, monospace"
-                            font.pixelSize: 10
-                        }
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Switch {
-                        id: barSwitch
-                        checked: !backend.barHidden
-                        onToggled: backend.setBarHidden(!checked)
                     }
                 }
             }

@@ -89,7 +89,7 @@ Item {
 
   // inotify can miss the CLI's atomic rename; a heartbeat closes the gap.
   Timer {
-    interval: 1000
+    interval: service.streaming ? 300 : 800
     running: true
     repeat: true
     onTriggered: {

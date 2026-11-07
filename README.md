@@ -45,27 +45,34 @@ Arch package route instead (asks for the sudo password): `./install.sh --package
 1. **Open Omastream** from the launcher.
 2. **Paste your stream key.** In YouTube: Studio → **Go live** → Stream
    settings → copy the **stream key** — paste it in the app's *YouTube stream
-   key* field. It's stored locally in `~/.config/omastream/config.env`
+   key* field (click the gear icon). It's stored locally in `~/.config/omastream/config.env`
    (file is `chmod 700`, never committed, never logged).
    Prefer the terminal? `omastream-cli config stream-key` (paste, Enter) or
    `omastream-cli config set STREAM_KEY 'xxxx-xxxx-xxxx'`.
 3. Pick **System audio** (desktop sound), **Microphone**, **codec** and
    **bitrate** in Settings — honest defaults for 1080p are already set.
-4. Press **Space** (or the big play button). The status card turns red with
-   a live clock; YouTube Studio reports "Excellent connectivity".
-5. Press **Space** again to stop. The stream ends gracefully (RTMP close,
-   final frames intact).
+4. Press **Space** (or click the big central button). The app goes directly live
+   to YouTube with GPU encoding.
+5. Press **Space** again (or click the button) to stop. The stream ends gracefully
+   (RTMP close, final frames intact).
 
-Not sure the capture works before showtime? Press **T** — *Test capture*
-records an 8 s local file (`/tmp/omastream-test.flv`), nothing is uploaded,
-and it stops itself.
+## Top bar controls & live sync
+
+The top bar remains normal during regular desktop use. While streaming:
+
+- A red **LIVE** badge appears automatically on the top bar showing the live stream countdown / elapsed time.
+- **Left-click** opens a compact popup with two focused options:
+  - **Stop Stream**: Stops the stream immediately.
+  - **Hide / Show Webcam**: Toggles the floating webcam bubble.
+- **Middle-click** directly toggles the camera bubble.
+- **Right-click** opens YouTube Studio.
+- **Full synchronization**: Stopping the stream from the app, the top bar popup, or `omastream-cli stop` immediately updates and synchronizes both interfaces in real time, hiding the bar widget and returning the desktop to normal.
 
 ## The camera bubble
 
-Toggle with the **Camera bubble** switch or **C**:
+Toggle with the **Webcam** switch or **C**:
 
-- **Drag** it anywhere — hold the corner grip to resize; the shape ratio is
-  kept and both the on-screen bubble and the in-stream composite stay in step.
+- **Drag & resize**: Move the bubble anywhere on your screens. Drag the corner to resize — positions and dimensions persist automatically across runs without snap-back.
 - **Shapes:** Circle · 1:1 · 16:9 (the selected one wears your Omarchy accent).
 - **Mirror** — the natural "selfie view" for your front camera.
 - While you're live, the preview pauses into a **LIVE** placeholder — that's
@@ -85,16 +92,15 @@ Toggle with the **Camera bubble** switch or **C**:
 | **Video codec** | `h264` — YouTube RTMP ingest, VA-API QuickSync. `hevc` is there to try, but YouTube RTMP may reject it. |
 | **Bitrate (CBR)** | 3000 / 4500 / 6000 / 8000 / 9000 kbps. 1080p30 → **4500**, 1080p60 → 6000–9000. |
 | **Mirror** | Flips the camera horizontally. |
-| **Camera bubble** | Show / hide the floating self-view. |
+| **Webcam** | Show / hide the floating self-view bubble. |
 
 ## Keyboard shortcuts
 
 | Key | Action |
 | --- | --- |
-| `Space` | Go live / stop |
-| `C` | Show or hide the camera bubble |
-| `T` | 8 second test capture — local file, no upload |
-| `?` | Show or hide the shortcuts overlay |
+| `Space` | Go live to YouTube / stop stream |
+| `C` | Show or hide the webcam bubble |
+| `Escape` | Close settings overlay |
 | `Q` | Quit — asks first if a stream is running |
 
 Wayland-only, in-app. The shell plugin adds its own: **click** the LIVE badge
