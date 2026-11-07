@@ -13,7 +13,7 @@ BarWidget {
   id: root
   moduleName: "dhirajarya.omastream"
 
-  readonly property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream"
+  readonly property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/omastream/state.json"
 

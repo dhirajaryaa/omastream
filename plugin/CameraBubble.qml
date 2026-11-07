@@ -99,7 +99,7 @@ PanelWindow {
   mask: Region { item: frame }
 
   // ── persistence ──────────────────────────────────────────────────────────────
-  property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream"
+  property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
 
   Process {
     id: saveProc

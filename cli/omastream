@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# omastream — Omarchy-native RTMP streaming control.
+# omastream-cli — Omarchy-native RTMP streaming control.
 #
 # Drives gpu-screen-recorder for zero-lag, hardware-accelerated (VA-API)
 # streaming to YouTube Live (or any RTMP endpoint). The omastream shell
@@ -305,8 +305,8 @@ cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
     key="$(cfg STREAM_KEY '')"
     if [[ -z $key ]]; then
       die "no STREAM_KEY in $CONFIG_FILE
-set it:       omastream config stream-key '<your-youtube-key>'
-local check:  omastream test"
+set it:       omastream-cli config stream-key '<your-youtube-key>'
+local check:  omastream-cli test"
     fi
     if [[ $key == rtmp://* ]]; then output="$key"; else output="$(rtmp_base)/$key"; fi
     mode="stream"
@@ -316,7 +316,7 @@ local check:  omastream test"
     local curpid
     curpid="$(state_get '.pid' 0)"
     if gsr_pid_alive "$curpid"; then
-      die "already streaming (pid $curpid) — 'omastream stop' first"
+      die "already streaming (pid $curpid) — 'omastream-cli stop' first"
     fi
   fi
 
@@ -576,7 +576,7 @@ cmd_cam() { # cmd_cam <sub> [args…]
       echo "camera flip: $nxt" ;;
     save) # cam save '<json>' — the QML bubble persists drag/resize through here
       payload="${1:-}"
-      [[ -n $payload ]] || die "cam save needs JSON, e.g. omastream cam save '{\"x\":0.7,\"y\":0.6,\"size\":0.2,\"shape\":\"16:9\",\"screen\":\"HDMI-A-1\"}'"
+      [[ -n $payload ]] || die "cam save needs JSON, e.g. omastream-cli cam save '{\"x\":0.7,\"y\":0.6,\"size\":0.2,\"shape\":\"16:9\",\"screen\":\"HDMI-A-1\"}'"
       x=$(jq -re '.x' <<<"$payload" 2>/dev/null)
       y=$(jq -re '.y' <<<"$payload" 2>/dev/null)
       size=$(jq -re '.size' <<<"$payload" 2>/dev/null)
@@ -640,7 +640,9 @@ ENV
 }
 
 cmd_config() {
-  local sub="${1:-}" key
+  local sub="${1:-}"
+  [[ $# -gt 0 ]] && shift
+  local key
   case "$sub" in
     "")
       create_config; echo "$CONFIG_FILE" ;;
@@ -662,8 +664,23 @@ cmd_config() {
       echo "stream key saved in $CONFIG_FILE" ;;
     open)
       create_config && exec "${EDITOR:-vi}" "$CONFIG_FILE" ;;
+    set)
+      local value allowed
+      key="${1:-}"; value="${2:-}"
+      # app-facing settings; keep this list to what gpu-screen-recorder can use
+      allowed="|STREAM_KEY|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|"
+      [[ $value != *[\"\'$'\n'\\]* ]] || die "invalid value for $key"
+      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT"
+      create_config
+      if grep -q "^${key}=" "$CONFIG_FILE"; then
+        sed -i "s#^${key}=.*#${key}='$value'#" "$CONFIG_FILE"
+      else
+        printf "\n%s='%s'\n" "$key" "$value" >> "$CONFIG_FILE"
+      fi
+      chmod 600 "$CONFIG_FILE"
+      echo "$key=$value saved" ;;
     print)
-      [[ -r $CONFIG_FILE ]] || die "no config yet — run: omastream config"
+      [[ -r $CONFIG_FILE ]] || die "no config yet — run: omastream-cli config"
       sed -E 's#^(STREAM_KEY=).*#\1<redacted>#' "$CONFIG_FILE" ;;
     *) die "unknown config command: '$sub'" ;;
   esac
@@ -684,20 +701,20 @@ usage() {
   cat <<'USAGE'
 omastream — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → RTMP/YouTube)
 
-  omastream                          status summary
-  omastream start [--cam on|off] [--file PATH] [--cpu-fallback]
+  omastream-cli                          status summary
+  omastream-cli start [--cam on|off] [--file PATH] [--cpu-fallback]
                                      go live (STREAM_KEY) or record to PATH
-  omastream stop                     graceful stop (SIGINT closes the RTMP stream)
-  omastream toggle                   stop ↔ start
-  omastream status [--json|--check]  what the bar widget calls
-  omastream test [--secs N]          short local-file pipeline test, no key needed
-  omastream cam on|off|toggle        show / hide the camera bubble
-  omastream cam shape <circle|1:1|16:9>
-  omastream cam --shape <s>          same as "cam shape <s>"
-  omastream cam cycle-shape
-  omastream cam save '<json>'        the shell bubble persists drag/resize here
-  omastream cam status
-  omastream config [stream-key|open|print]
+  omastream-cli stop                     graceful stop (SIGINT closes the RTMP stream)
+  omastream-cli toggle                   stop ↔ start
+  omastream-cli status [--json|--check]  what the bar widget calls
+  omastream-cli test [--secs N]          short local-file pipeline test, no key needed
+  omastream-cli cam on|off|toggle        show / hide the camera bubble
+  omastream-cli cam shape <circle|1:1|16:9>
+  omastream-cli cam --shape <s>          same as "cam shape <s>"
+  omastream-cli cam cycle-shape
+  omastream-cli cam save '<json>'        the shell bubble persists drag/resize here
+  omastream-cli cam status
+  omastream-cli config [stream-key|set KEY VALUE|open|print]
 
 files:
   config:  ~/.config/omastream/config.env   (STREAM_KEY — private, never commit)
