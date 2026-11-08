@@ -3,10 +3,14 @@
 Multi-platform live streaming studio for Arch Linux & Omarchy — stream to **YouTube Live**, **Twitch**, and **Kick** simultaneously with zero-lag GPU encoding (`gpu-screen-recorder` → VA-API/NVENC), zero-copy multi-streaming relay (`ffmpeg` tee muxer without re-encoding), a live floating camera bubble overlay, and full compositor independence across Wayland environments (Hyprland, Sway, River, etc.).
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The Omastream window — sleek cards, concentric live button and live camera studio controls" width="360">
+  <img src="docs/omastream_demo.gif" alt="Omastream Multi-Platform Live Streaming Studio Demo" width="100%">
 </p>
 
 The app is the main surface: press **Space** to go live, press it again to stop. Select any combination of platforms (**YouTube**, **Twitch**, **Kick**) with independent toggle switches and credential cards. Everything it does it does through `omastream-cli`, the engine — quick settings (`config set`) require nothing more. No Electron, no web view: a native Qt Quick app that follows your Omarchy theme accent, needs about 10 MB of RAM, and leaves the CPU heavy lifting to your GPU.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="The Omastream window — sleek cards, concentric live button and live camera studio controls" width="360">
+</p>
 
 ---
 
