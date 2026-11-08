@@ -18,24 +18,57 @@ about 10 MB of RAM, and leaves the CPU heavy lifting to your GPU.
 
 ## Install
 
+### Prerequisites (Arch Linux / Omarchy)
+
+Make sure the required packages are installed:
+
 ```sh
-git clone git@github.com:dhirajaryaa/omastream.git
+sudo pacman -S --needed base-devel qt6-base qt6-declarative qt6-multimedia qt6-wayland gpu-screen-recorder jq
+```
+
+> **Note for Intel iGPU (Pre-Haswell / Ivy Bridge):**
+> If you have older Intel graphics, install the legacy VA-API driver:
+> `sudo pacman -S --needed libva-intel-driver libva-utils`
+> (Or simply toggle **Auto CPU fallback** in Omastream settings if GPU encoding is unsupported).
+
+---
+
+### Quick Install (User-level, No Root Needed)
+
+Clone the repository and run `install.sh`:
+
+```sh
+git clone https://github.com/dhirajaryaa/omastream.git
 cd omastream
 ./install.sh
 ```
 
-`install.sh` builds the app and installs it user-level (no sudo needed):
+`install.sh` builds the native Qt app and sets up everything in your user profile:
 
-| What | Where |
-| --- | --- |
-| App (the window) | `~/.local/bin/omastream` |
-| CLI (the engine) | `~/.local/bin/omastream-cli` |
-| Launcher entry + icon | `~/.local/share/applications/omastream.desktop`, hicolor icons |
-| Shell bubble + LIVE badge plugin | `~/.config/omarchy/plugins/dhirajarya.omastream/` |
+| Component | Destination | Description |
+| --- | --- | --- |
+| **Omastream App** | `~/.local/bin/omastream` | Sleek, native Qt Quick window |
+| **Omastream CLI** | `~/.local/bin/omastream-cli` | Core streaming & overlay engine |
+| **Desktop Launcher** | `~/.local/share/applications/omastream.desktop` | App launcher entry (`Super + Space` → **Omastream**) |
+| **App Icons** | `~/.local/share/icons/hicolor/` | Scalable vector and raster icons |
+| **Omarchy Plugin** | `~/.config/omarchy/plugins/dhirajarya.omastream/` | Interactive camera bubble overlay & LIVE top bar badge |
 
-Then open your launcher (**Super + Space**) and type **Omastream**.
+Once finished, launch **Omastream** directly from your application launcher (**Super + Space**) or terminal:
 
-Arch package route instead (asks for sudo password): `./install.sh --package`.
+```sh
+omastream
+```
+
+---
+
+### Arch Package Route (Optional)
+
+If you prefer installing as a system package via `makepkg`:
+
+```sh
+cd omastream/pkgbuild
+makepkg -si
+```
 
 ---
 
@@ -151,6 +184,14 @@ Everything the window does is fully scriptable via the CLI:
 | `~/.local/state/omastream/state.json` | Runtime state — shared between the app, bubble, and top bar |
 | `~/.local/state/omastream/stream.log` | `gpu-screen-recorder` execution log |
 | `~/.config/omarchy/plugins/dhirajarya.omastream/` | Camera bubble overlay + LIVE bar badge Quickshell plugin |
+
+---
+
+## Security & Privacy
+
+- **Private Stream Keys**: Your YouTube stream key is stored strictly on your local filesystem at `~/.config/omastream/config.env` with owner-only read/write permissions (`chmod 600`).
+- **No Analytics / Telemetry**: Omastream communicates only with YouTube's RTMP ingest servers via `gpu-screen-recorder`. No remote logging, analytics, or background telemetry.
+- **Clean Repository**: Git ignores all `.env` files and runtime state by design. Local keys and logs will never be committed or uploaded.
 
 ---
 

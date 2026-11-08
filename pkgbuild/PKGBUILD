@@ -1,5 +1,5 @@
 pkgname=omastream
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc='Stream to YouTube Live from Omarchy — gpu-screen-recorder encode, camera bubble, one honest window'
 arch=('x86_64' 'aarch64')

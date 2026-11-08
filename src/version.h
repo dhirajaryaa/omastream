@@ -1,3 +1,3 @@
 #pragma once
 
-#define OMASTREAM_VERSION "0.1.0"
+#define OMASTREAM_VERSION "1.0.0"
