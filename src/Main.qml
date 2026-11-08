@@ -1011,6 +1011,34 @@ ApplicationWindow {
                         onActivated: (index) => backend.setSetting("VIDEO_BITRATE", model[index])
                     }
 
+                    // Screen Text Sharpness (enhances screen capture text clarity for low-res monitors)
+                    Text {
+                        text: qsTr("Screen text sharpness (monitor capture)")
+                        color: "#a0a4b8"
+                        font.pixelSize: 12
+                    }
+
+                    ComboBox {
+                        id: screenSharpnessSelect
+                        Layout.fillWidth: true
+                        textRole: "label"
+                        valueRole: "value"
+                        model: [
+                            { label: qsTr("Normal / Off (Default)"), value: "off" },
+                            { label: qsTr("Crisp Text (Full contrast range & edge tuning)"), value: "crisp" },
+                            { label: qsTr("High Sharpness (Clean text for 720p/900p monitors)"), value: "high" },
+                            { label: qsTr("Ultra Sharp (Maximum font clarity & deblocking)"), value: "ultra" }
+                        ]
+                        currentIndex: {
+                            const s = String(backend.screenSharpness || "off").toLowerCase()
+                            if (s === "ultra" || s === "max" || s === "3") return 3
+                            if (s === "high" || s === "medium" || s === "true" || s === "on" || s === "2") return 2
+                            if (s === "crisp" || s === "low" || s === "1") return 1
+                            return 0
+                        }
+                        onActivated: (index) => backend.setSetting("SCREEN_SHARPNESS", model[index].value)
+                    }
+
                     // CPU fallback toggle
                     RowLayout {
                         Layout.fillWidth: true

@@ -52,7 +52,6 @@ Item {
   readonly property bool camVisible: cam ? cam.visible === true : false
   readonly property string camShape: cam ? String(cam.shape || "16:9") : "16:9"
   readonly property real camRadius: cam && typeof cam.radius === "number" ? cam.radius : 0.20
-  readonly property real camSharpness: cam && typeof cam.sharpness === "number" ? cam.sharpness : 0.0
 
   property var camConf: ({})
 
@@ -133,8 +132,7 @@ Item {
         camVisible: streamService.camVisible,
         streaming: streamService.streaming,
         shape: streamService.camShape,
-        radius: streamService.camRadius,
-        sharpness: streamService.camSharpness
+        radius: streamService.camRadius
       })
     }
     function toggleCam(): string {
@@ -151,10 +149,6 @@ Item {
     }
     function setRadius(radius: string): string {
       Quickshell.execDetached([streamService.omastreamBin, "cam", "radius", radius])
-      return "ok"
-    }
-    function setSharpness(sharpness: string): string {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "sharpness", sharpness])
       return "ok"
     }
   }

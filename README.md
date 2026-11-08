@@ -65,7 +65,7 @@ The floating camera bubble is always interactive and visible both during preview
 - **Zero-Flicker Hover HUD**: Hover over the webcam bubble to reveal on-glass controls with smooth transitions—no blinking, re-render flashing, or video blanking.
 - **Interactive Shape Selector**: Switch instantly between **Circle**, **1:1 Square** (true pixel square width and height), and **16:9 Wide**.
 - **Dynamic Corner Rounding Slider**: For 1:1 and 16:9 modes, adjust corners on-the-fly from sharp (`0px`), to squircle, to fully rounded capsules, with instant `0` and `Max` preset buttons.
-- **OBS-Style Sharpness & Clarity Filter**: Adjust video sharpness (`0.0` to `1.0` or 0% to 100%) directly from the on-glass HUD or CLI to eliminate webcam haze, punch up edge clarity, and enhance detail.
+- **Natural Webcam Preview**: Webcam video feed is displayed cleanly and naturally without artificial color shifts or HUD filters.
 - **Stream Lifecycle Auto-Off**: When live streaming completes or when the app is closed, the webcam overlay automatically turns off and releases without leaving a dangling overlay on your desktop.
 - **Selfie Mirror**: One-click toggle (`CAM_FLIP`) to mirror your front camera for a natural view.
 - **Corner Snap Presets**:
@@ -101,6 +101,7 @@ The top bar remains completely normal during desktop use. While streaming:
 | **Microphone** | `Default microphone` follows system input; or pick any audio source. Toggle off removes the mic track completely. |
 | **Video codec** | `h264` (recommended for YouTube RTMP ingest) or `hevc`. |
 | **Bitrate (CBR)** | 3000 / 4500 / 6000 / 8000 / 9000 kbps (4500 ≈ recommended 1080p30). |
+| **Screen text sharpness** | Enhance font and UI text clarity when streaming from low-resolution monitors (e.g. 720p/900p): `Normal / Off`, `Crisp` (full contrast range 0-255 & edge tuning), `High Sharpness` (clean text for code & terminals), or `Ultra Sharp` (maximum font clarity & deblocking). |
 | **Auto CPU fallback** | Automatically falls back to CPU encoding if the GPU encoder fails or is unsupported. |
 | **Mirror camera** | Flips the camera horizontally. |
 | **Webcam Overlay** | Show / hide the floating self-view bubble on screen. |
@@ -134,11 +135,10 @@ Everything the window does is fully scriptable via the CLI:
 | `omastream-cli cam shape <circle\|1:1\|16:9>` | Change camera bubble shape |
 | `omastream-cli cam cycle-shape` | Cycle through bubble shapes |
 | `omastream-cli cam radius <0..1\|0..100>` | Adjust corner rounding (0 = sharp square, 1.0 = round/capsule) |
-| `omastream-cli cam sharpness <0..1\|0..100>` | Adjust video sharpness / clarity filter (OBS-style) |
 | `omastream-cli cam corner <tl\|tr\|bl\|br>` | Snap camera bubble to a screen corner |
 | `omastream-cli cam flip <true\|false>` | Toggle horizontal camera mirror |
-| `omastream-cli cam save '<json>'` | Persist bubble coordinates, dimensions, radius, and sharpness |
-| `omastream-cli cam status` | Output current camera visibility, shape, radius, sharpness, and coordinates |
+| `omastream-cli cam save '<json>'` | Persist bubble coordinates, dimensions, and radius |
+| `omastream-cli cam status` | Output current camera visibility, shape, radius, and coordinates |
 | `omastream-cli config [stream-key\|set KEY VALUE\|open\|print]` | Manage settings in `config.env` |
 
 ---

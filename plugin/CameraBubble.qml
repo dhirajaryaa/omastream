@@ -102,15 +102,6 @@ PanelWindow {
     return 0.20
   }
 
-  // Sharpness ratio (0.0 = raw feed, 1.0 = maximum edge clarity / micro-contrast)
-  property real sharpnessRatio: {
-    if (cam && typeof cam.sharpness === "number") {
-      var s = cam.sharpness
-      return (s > 1.0) ? Math.min(1.0, s / 100.0) : Math.max(0.0, Math.min(1.0, s))
-    }
-    return 0.0
-  }
-
   // ── monitor resolution & visibility ──────────────────────────────────────────
   readonly property string screenName: screen && screen.name ? String(screen.name) : ""
   readonly property string focusScreenName: {
@@ -240,8 +231,7 @@ PanelWindow {
       x: currentXFrac,
       y: currentYFrac,
       size: currentSizeFrac,
-      radius: root.radiusRatio,
-      sharpness: root.sharpnessRatio
+      radius: root.radiusRatio
     })]
     saveProc.running = true
   }
@@ -274,8 +264,8 @@ PanelWindow {
 
   Camera {
     id: camera
-    cameraDevice: root.pickDevice()
-    active: root.visible && !deviceBusy
+    cameraDevice: (root.camVisible && root.canShowCamera) ? root.pickDevice() : null
+    active: root.camVisible && root.canShowCamera && !deviceBusy
     property bool deviceBusy: false
     onErrorOccurred: (error, errorString) => {
       console.warn("CameraBubble camera error: " + errorString)
@@ -352,27 +342,21 @@ PanelWindow {
       }
     }
 
-    // ── 1. Live video output with mirror, corner mask, & sharpness ───────────
+    // ── 1. Live video output with horizontal mirror & corner rounding ─────────
     Item {
       id: videoHost
       anchors.fill: parent
       anchors.margins: 1
       visible: root.videoShowing
 
-      // MultiEffect enabled for rounded corners or sharpness clarity boost
-      layer.enabled: (root.effectiveRadius > 0) || (root.sharpnessRatio > 0.01)
+      // MultiEffect applied only when rounding is active (> 0)
+      layer.enabled: root.effectiveRadius > 0
       layer.smooth: true
       layer.effect: MultiEffect {
-        maskEnabled: root.effectiveRadius > 0
+        maskEnabled: true
         maskSource: maskRect
         maskThresholdMin: 0.5
         maskSpreadAtMin: 1.0
-
-        // OBS-style video clarity / sharpness enhancement:
-        // Enhances edge definition and micro-contrast cleanly
-        contrast: root.sharpnessRatio * 0.40
-        saturation: root.sharpnessRatio * 0.15
-        brightness: root.sharpnessRatio * 0.04
       }
 
       VideoOutput {
@@ -488,13 +472,13 @@ PanelWindow {
       onCanceled: root.commitMove()
     }
 
-    // ── HUD Controls Card (Pill + Corner Slider + Sharpness Slider) ───────────
+    // ── HUD Controls Card (Pill + Corner Slider) ─────────────────────────────
     Item {
       id: hudCard
       anchors.top: parent.top
       anchors.topMargin: Style.space(4)
       anchors.horizontalCenter: parent.horizontalCenter
-      width: Math.min(parent.width - Style.space(8), Style.space(270))
+      width: Math.min(parent.width - Style.space(8), Style.space(240))
       height: hudColumn.height + Style.space(8)
       z: 20
 
@@ -893,146 +877,6 @@ PanelWindow {
           Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.effectiveRadius === 0 ? "Square" : (Math.round(root.effectiveRadius) + "px")
-            font.pixelSize: 9
-            font.bold: true
-            color: Color.accent
-          }
-        }
-
-        // ── Row 3: Sharpness Filter Slider (OBS-style 0.0 to 1.0) ─────────────
-        Row {
-          id: sharpRow
-          anchors.horizontalCenter: parent.horizontalCenter
-          spacing: Style.space(4)
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "✦"
-            font.pixelSize: 10
-            color: Style.normalBorderColor
-          }
-
-          // Quick Preset: 0 (Raw Feed)
-          MouseArea {
-            width: Style.space(18)
-            height: Style.space(18)
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: {
-              root.sharpnessRatio = 0.0
-              root.saveNow()
-            }
-
-            Rectangle {
-              anchors.fill: parent
-              radius: 2
-              color: root.sharpnessRatio < 0.04 ? Qt.alpha(Color.accent, 0.3)
-                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
-              border.width: 1
-              border.color: root.sharpnessRatio < 0.04 ? Color.accent : Style.normalBorderColor
-            }
-            Text {
-              anchors.centerIn: parent
-              text: "0"
-              font.pixelSize: 9
-              font.bold: true
-              color: root.sharpnessRatio < 0.04 ? Color.urgent : Style.normalBorderColor
-            }
-          }
-
-          // Slider Track
-          Rectangle {
-            id: sharpTrack
-            width: Style.space(95)
-            height: Style.space(6)
-            radius: height / 2
-            anchors.verticalCenter: parent.verticalCenter
-            color: Qt.alpha(Color.foreground, 0.18)
-
-            // Active Track Fill
-            Rectangle {
-              width: Math.max(0, Math.min(sharpTrack.width, root.sharpnessRatio * sharpTrack.width))
-              height: parent.height
-              radius: parent.radius
-              color: Color.accent
-            }
-
-            // Draggable Thumb Handle
-            Rectangle {
-              x: Math.max(0, Math.min(sharpTrack.width - width, root.sharpnessRatio * (sharpTrack.width - width)))
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(12)
-              height: width
-              radius: width / 2
-              color: sharpMouse.containsMouse || sharpMouse.pressed ? Color.urgent : Color.accent
-              border.width: 2
-              border.color: "#ffffff"
-            }
-
-            MouseArea {
-              id: sharpMouse
-              anchors.fill: parent
-              anchors.margins: -Style.space(6)
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              acceptedButtons: Qt.LeftButton
-
-              function updateRatio(mouseX) {
-                var localX = mouseX - Style.space(6)
-                var ratio = Math.max(0.0, Math.min(1.0, localX / sharpTrack.width))
-                root.sharpnessRatio = Math.round(ratio * 100) / 100
-              }
-
-              onPressed: (mouse) => {
-                root.sliderActive = true
-                updateRatio(mouse.x)
-              }
-              onPositionChanged: (mouse) => {
-                if (pressed) updateRatio(mouse.x)
-              }
-              onReleased: {
-                root.sliderActive = false
-                root.saveNow()
-              }
-              onCanceled: {
-                root.sliderActive = false
-                root.saveNow()
-              }
-            }
-          }
-
-          // Quick Preset: Max (Sharpest)
-          MouseArea {
-            width: Style.space(26)
-            height: Style.space(18)
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: {
-              root.sharpnessRatio = 1.0
-              root.saveNow()
-            }
-
-            Rectangle {
-              anchors.fill: parent
-              radius: 2
-              color: root.sharpnessRatio > 0.95 ? Qt.alpha(Color.accent, 0.3)
-                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
-              border.width: 1
-              border.color: root.sharpnessRatio > 0.95 ? Color.accent : Style.normalBorderColor
-            }
-            Text {
-              anchors.centerIn: parent
-              text: "Max"
-              font.pixelSize: 8
-              font.bold: true
-              color: root.sharpnessRatio > 0.95 ? Color.urgent : Style.normalBorderColor
-            }
-          }
-
-          // Sharpness Percentage Value Badge
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.sharpnessRatio === 0 ? "Raw" : (Math.round(root.sharpnessRatio * 100) + "%")
             font.pixelSize: 9
             font.bold: true
             color: Color.accent

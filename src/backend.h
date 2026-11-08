@@ -29,6 +29,7 @@ class Backend : public QObject {
     Q_PROPERTY(bool micEnabled READ micEnabled NOTIFY configChanged)
     Q_PROPERTY(QString videoCodec READ videoCodec NOTIFY configChanged)
     Q_PROPERTY(int bitrate READ bitrate NOTIFY configChanged)
+    Q_PROPERTY(QString screenSharpness READ screenSharpness NOTIFY configChanged)
     Q_PROPERTY(bool camOnStart READ camOnStart NOTIFY configChanged)
     Q_PROPERTY(bool cpuFallback READ cpuFallback NOTIFY configChanged)
     Q_PROPERTY(QVariantList systemOutputs READ systemOutputs NOTIFY audioDevicesChanged)
@@ -62,6 +63,7 @@ public:
     bool micEnabled() const { return m_config.value("MIC_ENABLED", "true").toString() != "false"; }
     QString videoCodec() const { return m_config.value("VIDEO_CODEC", "h264").toString(); }
     int bitrate() const { return m_config.value("VIDEO_BITRATE", "4500").toString().toInt(); }
+    QString screenSharpness() const { return m_config.value("SCREEN_SHARPNESS", "off").toString(); }
     bool camOnStart() const { return m_config.value("CAM_ON_START", "false").toString() == "true"; }
     bool cpuFallback() const { return m_config.value("CPU_FALLBACK", "true").toString() != "false"; }
     QVariantList systemOutputs() const { return m_systemOutputs; }
