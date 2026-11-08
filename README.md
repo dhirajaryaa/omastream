@@ -61,16 +61,17 @@ Arch package route instead (asks for sudo password): `./install.sh --package`.
 
 The floating camera bubble is always interactive and visible both during preview and live streaming:
 
-- **Instant Framing on Launch**: When you open Omastream, the webcam bubble appears immediately on screen so you can set up framing before broadcasting.
-- **Live Stream Capture**: The camera bubble is captured directly on screen by `gpu-screen-recorder` — **no device locking**, no screen freezes, and no placeholder screens while live.
-- **Interactive Shape Selector**: Switch instantly between **Circle**, **1:1 Square**, and **16:9 Wide**.
+- **Instant Framing on Launch**: When you open Omastream, the webcam bubble appears immediately on screen so you can set up framing before broadcasting. It automatically closes and releases the camera when you exit the app (unless actively live streaming), and never auto-starts on PC/OS boot.
+- **Zero-Flicker Hover HUD**: Hover over the webcam bubble to reveal on-glass controls with smooth transitions—no blinking, re-render flashing, or video blanking.
+- **Interactive Shape Selector**: Switch instantly between **Circle**, **1:1 Square** (true pixel square width and height), and **16:9 Wide**.
+- **Dynamic Corner Rounding Slider**: For 1:1 and 16:9 modes, adjust corners on-the-fly from sharp (`0px`), to squircle, to fully rounded capsules, with instant `0` and `Max` preset buttons.
 - **Selfie Mirror**: One-click toggle (`CAM_FLIP`) to mirror your front camera for a natural view.
 - **Corner Snap Presets**:
   - `↖` **Top-Left**
   - `↗` **Top-Right**
   - `↙` **Bottom-Left**
   - `↘` **Bottom-Right**
-- **Free Drag & Resize**: Drag the bubble anywhere across your displays. Grab the bottom-right handle to resize smoothly. Coordinates and sizes persist per screen and shape.
+- **Free Drag & Resize**: Drag the bubble anywhere across your displays with magnetic edge snapping. Grab the bottom-right handle to resize smoothly. Coordinates, shape, and corner radius persist across sessions.
 
 ---
 
@@ -130,9 +131,11 @@ Everything the window does is fully scriptable via the CLI:
 | `omastream-cli cam on\|off\|toggle` | Show / hide the camera bubble |
 | `omastream-cli cam shape <circle\|1:1\|16:9>` | Change camera bubble shape |
 | `omastream-cli cam cycle-shape` | Cycle through bubble shapes |
+| `omastream-cli cam radius <0..1\|0..100>` | Adjust corner rounding (0 = sharp square, 1.0 = round/capsule) |
+| `omastream-cli cam corner <tl\|tr\|bl\|br>` | Snap camera bubble to a screen corner |
 | `omastream-cli cam flip <true\|false>` | Toggle horizontal camera mirror |
-| `omastream-cli cam save '<json>'` | Persist bubble coordinates and dimensions |
-| `omastream-cli cam status` | Output current camera visibility, shape, and coordinates |
+| `omastream-cli cam save '<json>'` | Persist bubble coordinates, dimensions, and radius |
+| `omastream-cli cam status` | Output current camera visibility, shape, radius, and coordinates |
 | `omastream-cli config [stream-key\|set KEY VALUE\|open\|print]` | Manage settings in `config.env` |
 
 ---

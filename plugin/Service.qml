@@ -3,21 +3,27 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 
-// omastream service — owns nothing but mirrors everything.
+// omastream service — manages the camera bubble overlay across monitors.
 //
 // The omastream CLI is the single writer of ~/.local/state/omastream/state.json;
-// this service watches it and re-publishes the snapshot to the camera bubble
-// (one per display via Variants). It also tells the omareel capture-exclude
-// plugin to hide the "omastream-" layer namespace from capture while a camera
-// is shown, so the stream shows gpu-screen-recorder's raw composited camera
-// instead of two cameras at once (ours + the one gsr draws in-stream).
+// this service watches it and instantiates CameraBubble (one per display via Variants).
+// Live camera bubble is composited directly on the desktop display so gpu-screen-recorder
+// captures it along with desktop windows.
 Item {
-  id: service
+  id: streamService
 
-  // Hosts inject their environment via these paths; keep them stable.
+  readonly property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
   readonly property string statePath: stateHome + "/omastream/state.json"
   readonly property string confPath: Quickshell.env("HOME") + "/.config/omastream/config.env"
+
+  // On clean startup (e.g. PC/OS boot), ensure webcam overlay does NOT start automatically.
+  // It only opens when triggered by omastream-app or user action.
+  Component.onCompleted: {
+    if (!streamService.streaming) {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
+    }
+  }
 
   // ── runtime state snapshot (CLI is the writer) ─────────────────────────────
   property var state: ({})
@@ -25,32 +31,30 @@ Item {
   readonly property var cam: state.cam || null
   readonly property bool camVisible: cam ? cam.visible === true : false
   readonly property string camShape: cam ? String(cam.shape || "16:9") : "16:9"
+  readonly property real camRadius: cam && typeof cam.radius === "number" ? cam.radius : 0.20
 
-  // config.env defaults for the bits QML needs that state.json doesn't carry.
   property var camConf: ({})
-  // Live camera bubble is captured on screen directly without v4l2 device locking
-  readonly property bool gsrOwnsCamera: false
 
   FileView {
     id: stateFile
-    path: service.statePath
+    path: streamService.statePath
     watchChanges: true
     atomicWrites: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: service.loadState(text())
-    onLoadFailed: service.loadState("")
+    onLoaded: streamService.loadState(text())
+    onLoadFailed: streamService.loadState("")
   }
 
   FileView {
     id: confFile
-    path: service.confPath
+    path: streamService.confPath
     watchChanges: true
     atomicWrites: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: service.loadConfig(text())
-    onLoadFailed: service.loadConfig("")
+    onLoaded: streamService.loadConfig(text())
+    onLoadFailed: streamService.loadConfig("")
   }
 
   function loadState(raw) {
@@ -61,7 +65,7 @@ Item {
     } catch (e) {
       parsed = {}
     }
-    service.state = parsed
+    streamService.state = parsed
   }
 
   function loadConfig(raw) {
@@ -74,7 +78,7 @@ Item {
       var val = lines[i].slice(eq + 1).split("#")[0].trim()
       c[key] = val
     }
-    service.camConf = {
+    streamService.camConf = {
       record: String(c.CAM_RECORD || "true") !== "false",
       flip: String(c.CAM_FLIP || "true") !== "false"
     }
@@ -85,13 +89,43 @@ Item {
     confFile.reload()
   }
 
-  // inotify can miss the CLI's atomic rename; a heartbeat closes the gap.
   Timer {
-    interval: service.streaming ? 300 : 800
+    interval: streamService.streaming ? 300 : 800
     running: true
     repeat: true
     onTriggered: {
-      service.reloadState()
+      streamService.reloadState()
+    }
+  }
+
+  ShellIpc {
+    target: "omastream"
+    function ping(): string {
+      return "pong"
+    }
+    function status(): string {
+      return JSON.stringify({
+        camVisible: streamService.camVisible,
+        streaming: streamService.streaming,
+        shape: streamService.camShape,
+        radius: streamService.camRadius
+      })
+    }
+    function toggleCam(): string {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "toggle"])
+      return "ok"
+    }
+    function snapCorner(corner: string): string {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "corner", corner])
+      return "ok"
+    }
+    function setShape(shape: string): string {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "shape", shape])
+      return "ok"
+    }
+    function setRadius(radius: string): string {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "radius", radius])
+      return "ok"
     }
   }
 
@@ -99,10 +133,12 @@ Item {
   Variants {
     model: Quickshell.screens
 
-    CameraBubble {
-      required property var modelData
-      screen: modelData
-      service: service
+    delegate: Component {
+      CameraBubble {
+        required property var modelData
+        screen: modelData
+        service: streamService
+      }
     }
   }
 }

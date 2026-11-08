@@ -37,6 +37,7 @@ class Backend : public QObject {
 public:
     explicit Backend(const QString &statePath = {}, const QString &configPath = {},
                      const QString &cli = {}, QObject *parent = nullptr);
+    ~Backend();
 
     bool streaming() const { return m_streaming; }
     QString elapsed() const { return m_elapsed; }

@@ -82,6 +82,13 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     emit stateChanged();
 }
 
+Backend::~Backend() {
+    // Only turn off preview camera if not live streaming
+    if (!m_streaming) {
+        runCommand({"cam", "off"}, {});
+    }
+}
+
 QString Backend::basePath(const char *xdgName, const char *fallback) {
     const QString env = qEnvironmentVariable(xdgName);
     if (!env.isEmpty())

@@ -605,6 +605,34 @@ cmd_cam() { # cmd_cam <sub> [args…]
       fi
       state_merge "{\"cam\":{\"flip\":$nxt}}"
       echo "camera flip: $nxt" ;;
+    radius)
+      local r="${1:-}"
+      [[ -n $r && $r =~ ^[0-9.]+$ ]] || die "cam radius needs a numeric value: 0..1 (ratio) or 0..100"
+      state_merge "{\"cam\":{\"radius\":$r}}"
+      echo "camera radius: $r" ;;
+    corner)
+      local c="${1:-bottom-right}"
+      shape="$(camera_shape)"
+      case "$shape" in
+        circle) size=0.17; contentH=0.17 ;;
+        16:9)   size=0.30; contentH="$(awk -v s="$size" 'BEGIN { printf "%.6f", s * 9 / 16 }')" ;;
+        *)      size=0.20; contentH=0.20 ;;
+      esac
+      case "$c" in
+        top-left|tl)
+          x="0.030000"; y="0.040000" ;;
+        top-right|tr)
+          x="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s - 0.03 }')"
+          y="0.040000" ;;
+        bottom-left|bl)
+          x="0.030000"
+          y="$(awk -v h="$contentH" 'BEGIN { printf "%.6f", 1 - h - 0.04 }')" ;;
+        bottom-right|br|*)
+          x="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s - 0.03 }')"
+          y="$(awk -v h="$contentH" 'BEGIN { printf "%.6f", 1 - h - 0.04 }')" ;;
+      esac
+      cmd_cam save "{\"shape\":\"$shape\",\"screen\":\"screen\",\"x\":$x,\"y\":$y,\"size\":$size}"
+      echo "camera corner: $c" ;;
     save) # cam save '<json>' — the QML bubble persists drag/resize through here
       payload="${1:-}"
       [[ -n $payload ]] || die "cam save needs JSON, e.g. omastream-cli cam save '{\"x\":0.7,\"y\":0.6,\"size\":0.2,\"shape\":\"16:9\",\"screen\":\"HDMI-A-1\"}'"
@@ -613,6 +641,7 @@ cmd_cam() { # cmd_cam <sub> [args…]
       size=$(jq -re '.size' <<<"$payload" 2>/dev/null)
       screen="$(jq -re '.screen // "screen"' <<<"$payload" 2>/dev/null)"
       shape=$(jq -re '.shape // ""' <<<"$payload" 2>/dev/null)
+      radius=$(jq -re '.radius // empty' <<<"$payload" 2>/dev/null)
       shape="$(norm_shape "$shape")"
       [[ -n $shape ]] || shape="$(camera_shape)"
       [[ $x =~ ^-?[0-9.]+$ && $y =~ ^-?[0-9.]+$ && $size =~ ^[0-9.]+$ ]] || die "cam save: x, y and size must be numbers"
@@ -625,6 +654,10 @@ cmd_cam() { # cmd_cam <sub> [args…]
       capX="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s }')"
       capY="$(awk -v s="$contentH" 'BEGIN { printf "%.6f", 1 - s }')"
       x="$(clamp_frac "$x" "$capX")"; y="$(clamp_frac "$y" "$capY")"
+      local radJson=""
+      if [[ -n $radius && $radius =~ ^[0-9.]+$ ]]; then
+        radJson=",\"radius\":$radius"
+      fi
       if [[ $screen == "screen" || $screen == "all" ]]; then
         local patch
         patch=$(state_json | jq -c --arg shape "$shape" --argjson x "$x" --argjson y "$y" --argjson size "$size" '
@@ -634,16 +667,16 @@ cmd_cam() { # cmd_cam <sub> [args…]
           | add // {}
           | .[($shape + "@screen")] = {x: $x, y: $y, size: $size}
         ' 2>/dev/null)
-        state_merge "{\"cam\":{\"geometry\":$patch}}"
+        state_merge "{\"cam\":{\"geometry\":$patch$radJson}}"
         printf '{"%s@screen":{"x":%s,"y":%s,"size":%s}}\n' "$shape" "$x" "$y" "$size"
       else
         key="$(geom_key "$shape" "$screen")"
-        state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}}}"
+        state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}$radJson}}"
         printf '{"%s":{"x":%s,"y":%s,"size":%s}}\n' "$key" "$x" "$y" "$size"
       fi
       ;;
     status)
-      state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
+      state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, radius: .cam.radius, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
     *)
       die "unknown camera command: '$sub' — on|off|toggle|shape|cycle-shape|save|device|flip|status" ;;
   esac
@@ -792,6 +825,9 @@ omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → R
   omastream-cli cam shape <circle|1:1|16:9>
   omastream-cli cam --shape <s>          same as "cam shape <s>"
   omastream-cli cam cycle-shape
+  omastream-cli cam corner <tl|tr|bl|br|top-left|top-right|bottom-left|bottom-right>
+  omastream-cli cam radius <0..1|0..100> corner radius ratio or pixels
+  omastream-cli cam flip [true|false]    horizontal mirror toggle
   omastream-cli cam save '<json>'        the shell bubble persists drag/resize here
   omastream-cli cam status
   omastream-cli config [stream-key|set KEY VALUE|open|print]

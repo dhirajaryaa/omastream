@@ -16,3 +16,11 @@ run/
 /pkgbuild/pkg/
 /pkgbuild/src/
 *.pkg.tar.*
+
+# qmake / build artifacts
+*.o
+moc_*
+qrc_*
+Makefile
+.qmake.stash
+omastream

@@ -7,98 +7,180 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 
-// The omastream camera bubble — a self-view built for streaming.
+// The omastream camera bubble — a floating self-view built for live streaming.
 //
-// Parked per (shape, display) as "shape@screen" fraction geometry that the CLI
-// mirrors into gpu-screen-recorder's composite, so this bubble and the camera
-// inside the live frame always sit at the same spot. Overlay layer, shown only
-// where it is parked, click-through everywhere except its own box.
-//
-// Shapes: circle / 1:1 / 16:9. Drag to move, grab the bottom-right grip to
-// resize (the shape ratio is kept). Persisted through `omastream-cli cam save` —
-// the CLI stays the single state writer.
+// Overlay layer, click-through everywhere except its own box.
+// Shapes: 1:1 Square, 16:9 Widescreen, Circle.
+// Dynamic Rounded Corner Slider: adjust from 0px (sharp square/rectangle) to squircle to full round!
+// Corner snapping: Top-Left, Top-Right, Bottom-Left, Bottom-Right.
+// Drag to move with magnetic corner snapping; grab bottom-right grip to resize.
 PanelWindow {
   id: root
 
-  required property var service
+  property var service: null
 
-  // ── where is this bubble wanted ─────────────────────────────────────────────
+  // ── state synchronization (single writer: omastream CLI) ─────────────────────
+  readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
+  readonly property string statePath: (service && service.statePath) ? service.statePath : (stateHome + "/omastream/state.json")
+  readonly property string confPath: (service && service.confPath) ? service.confPath : (Quickshell.env("HOME") + "/.config/omastream/config.env")
+  readonly property string omastreamBin: (service && service.omastreamBin) ? service.omastreamBin : ((Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli")
+
+  property var localState: ({})
+  property var localConf: ({})
+
+  FileView {
+    id: bubbleStateFile
+    path: root.statePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.loadLocalState(text())
+    onLoadFailed: root.loadLocalState("")
+  }
+
+  FileView {
+    id: bubbleConfFile
+    path: root.confPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.loadLocalConfig(text())
+    onLoadFailed: root.loadLocalConfig("")
+  }
+
+  function loadLocalState(raw) {
+    try {
+      var obj = JSON.parse(String(raw || "{}"))
+      if (obj && typeof obj === "object") localState = obj
+    } catch (e) {
+      localState = {}
+    }
+  }
+
+  function loadLocalConfig(raw) {
+    var c = {}
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var eq = lines[i].indexOf("=")
+      if (eq < 1) continue
+      var k = lines[i].slice(0, eq).trim()
+      var v = lines[i].slice(eq + 1).split("#")[0].trim()
+      c[k] = v
+    }
+    localConf = {
+      record: String(c.CAM_RECORD || "true") !== "false",
+      flip: String(c.CAM_FLIP || "true") !== "false"
+    }
+  }
+
+  Timer {
+    interval: 800
+    running: true
+    repeat: true
+    onTriggered: {
+      bubbleStateFile.reload()
+      bubbleConfFile.reload()
+    }
+  }
+
+  // ── camera properties ────────────────────────────────────────────────────────
+  readonly property var cam: service && service.cam ? service.cam : (localState.cam || null)
+  readonly property bool camVisible: cam ? cam.visible === true : false
+  readonly property string shape: service && service.camShape ? service.camShape : (cam && cam.shape ? String(cam.shape) : "1:1")
+  readonly property bool flip: cam && cam.flip !== null && cam.flip !== undefined
+    ? cam.flip === true : (service && service.camConf ? service.camConf.flip === true : (localConf.flip !== false))
+
+  // Corner radius ratio (0.0 = sharp corners, 1.0 = fully round)
+  property real radiusRatio: {
+    if (cam && typeof cam.radius === "number") {
+      var r = cam.radius
+      return (r > 1.0) ? Math.min(1.0, r / 60.0) : Math.max(0.0, Math.min(1.0, r))
+    }
+    return 0.20
+  }
+
+  // ── monitor resolution & visibility ──────────────────────────────────────────
   readonly property string screenName: screen && screen.name ? String(screen.name) : ""
   readonly property string focusScreenName: {
     var m = Hyprland.focusedMonitor
     return m && m.name ? String(m.name)
       : (Quickshell.screens.length ? String(Quickshell.screens[0].name) : "")
   }
-  readonly property var cam: service ? service.cam : null
-  readonly property string shape: service ? service.camShape : "16:9"
-  readonly property string myKey: shape + "@" + screenName
+
+  readonly property real logicalW: screen && screen.width > 0 ? screen.width : 1920
+  readonly property real logicalH: screen && screen.height > 0 ? screen.height : 1080
+
   readonly property var allGeom: cam && cam.geometry ? cam.geometry : null
-  readonly property bool haveShapeAnywhere: {
-    if (!allGeom) return false
-    for (var k in allGeom) {
-      if (String(k).indexOf(shape + "@") === 0) return true
-    }
-    return false
-  }
+  readonly property string myKey: shape + "@" + screenName
 
   readonly property var shapeGeom: {
     if (!allGeom) return null
     if (allGeom[myKey]) return allGeom[myKey]
-    if (allGeom[shape + "@screen"] && screenName === focusScreenName) return allGeom[shape + "@screen"]
-    if (allGeom[shape + "@screen"] && Quickshell.screens.length <= 1) return allGeom[shape + "@screen"]
+    if (allGeom[shape + "@screen"]) return allGeom[shape + "@screen"]
     return null
   }
-  readonly property bool parkedHere: shapeGeom !== null
-  readonly property bool fallbackHost: !haveShapeAnywhere && screenName === focusScreenName
-  visible: service ? (service.camVisible && (parkedHere || fallbackHost)) : false
 
-  // ── geometry: fractions of the display, defaults mirror the CLI ─────────────
-  readonly property real logicalW: screen && screen.width > 0 ? screen.width : 1920
-  readonly property real logicalH: screen && screen.height > 0 ? screen.height : 1080
+  readonly property bool isTargetScreen: {
+    if (Quickshell.screens.length <= 1) return true
+    if (shapeGeom !== null && allGeom && allGeom[myKey]) return true
+    if (screenName === focusScreenName) return true
+    var firstScreen = Quickshell.screens.length > 0 ? String(Quickshell.screens[0].name || "") : ""
+    return screenName === firstScreen
+  }
 
+  visible: root.camVisible && root.isTargetScreen
+
+  // ── geometry fractions & dimensions ──────────────────────────────────────────
   readonly property var defaults: {
     if (shape === "circle") return { "x": 0.78, "y": 0.68, "size": 0.17 }
     if (shape === "1:1") return { "x": 0.75, "y": 0.62, "size": 0.20 }
     return { "x": 0.62, "y": 0.58, "size": 0.30 }
   }
 
-  property real dragX: -1
-  property real dragY: -1
-  property real dragSize: -1
-  property point moveOriginMouse
-  property point moveOriginFrac
-  property point resizeOriginMouse
-  property real resizeOriginSize: -1
-  property bool moveDirty: false
-  property bool resizeDirty: false
-  readonly property bool hots: (typeof frame !== "undefined" && frame) ? frame.hots === true : false
+  property real currentXFrac: defaults.x
+  property real currentYFrac: defaults.y
+  property real currentSizeFrac: defaults.size
 
-  onShapeGeomChanged: {
-    if (!moving && !resizing) {
-      dragX = -1
-      dragY = -1
-      dragSize = -1
-    }
+  function syncFromGeom() {
+    if (moving || resizing) return
+    var geom = shapeGeom
+    var def = defaults
+    if (geom && typeof geom.x === "number") currentXFrac = geom.x
+    else if (def) currentXFrac = def.x
+
+    if (geom && typeof geom.y === "number") currentYFrac = geom.y
+    else if (def) currentYFrac = def.y
+
+    if (geom && typeof geom.size === "number") currentSizeFrac = geom.size
+    else if (def) currentSizeFrac = def.size
   }
 
-  readonly property bool resizing: resizeArea.pressed
-  readonly property bool moving: moveArea.pressed
-  readonly property real sizeFrac: dragSize >= 0 ? dragSize
-    : (shapeGeom && typeof shapeGeom.size === "number" ? shapeGeom.size : (defaults ? defaults.size : 0.20))
-  readonly property real xFrac: dragX >= 0 ? dragX
-    : (shapeGeom && typeof shapeGeom.x === "number" ? shapeGeom.x : (defaults ? defaults.x : 0.75))
-  readonly property real yFrac: dragY >= 0 ? dragY
-    : (shapeGeom && typeof shapeGeom.y === "number" ? shapeGeom.y : (defaults ? defaults.y : 0.62))
+  onShapeGeomChanged: syncFromGeom()
+  onShapeChanged: syncFromGeom()
+  Component.onCompleted: syncFromGeom()
 
-  readonly property real fracH: shape === "16:9" ? sizeFrac * 9 / 16 : sizeFrac
-  readonly property real boxWidth: Math.max(88, sizeFrac * logicalW)
-  readonly property real boxHeight: Math.max(50, fracH * logicalH)
-  readonly property real radius: shape === "circle"
-    ? Math.min(boxWidth, boxHeight) / 2 : Style.cornerRadius
+  // True 1:1 square width == height in pixels!
+  readonly property real boxWidth: Math.max(90, Math.round(currentSizeFrac * logicalW))
+  readonly property real boxHeight: {
+    if (shape === "1:1" || shape === "circle") return boxWidth
+    return Math.max(50, Math.round(boxWidth * 9.0 / 16.0))
+  }
 
-  readonly property real xPos: Math.max(0, Math.min(xFrac, 1 - sizeFrac)) * logicalW
-  readonly property real yPos: Math.max(0, Math.min(yFrac, 1 - fracH)) * logicalH
+  readonly property real fracW: boxWidth / logicalW
+  readonly property real fracH: boxHeight / logicalH
 
+  readonly property real maxRadius: Math.min(boxWidth, boxHeight) / 2
+  readonly property real effectiveRadius: {
+    if (shape === "circle") return maxRadius
+    return Math.max(0, Math.min(maxRadius, Math.round(root.radiusRatio * maxRadius)))
+  }
+
+  readonly property real xPos: Math.max(0, Math.min(currentXFrac, 1 - fracW)) * logicalW
+  readonly property real yPos: Math.max(0, Math.min(currentYFrac, 1 - fracH)) * logicalH
+
+  // ── surface anchors & layer configuration ──────────────────────────────────
   anchors { top: true; bottom: true; left: true; right: true }
   color: "transparent"
 
@@ -107,15 +189,14 @@ PanelWindow {
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
   exclusionMode: ExclusionMode.Ignore
 
-  // Everything outside `frame` passes clicks through to the windows below.
+  // Only the bubble frame catches clicks; remainder of display is click-through
   mask: Region { item: frame }
 
-  // ── persistence ──────────────────────────────────────────────────────────────
-  property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
-
+  // ── persistence & commands ──────────────────────────────────────────────────
   Process {
     id: saveProc
     onExited: () => {
+      bubbleStateFile.reload()
       if (root.service && typeof root.service.reloadState === "function") {
         root.service.reloadState()
       }
@@ -125,6 +206,7 @@ PanelWindow {
   Process {
     id: cmdProc
     onExited: () => {
+      bubbleStateFile.reload()
       if (root.service && typeof root.service.reloadState === "function") {
         root.service.reloadState()
       }
@@ -140,41 +222,39 @@ PanelWindow {
     saveProc.command = [omastreamBin, "cam", "save", JSON.stringify({
       shape: shape,
       screen: screenName,
-      x: xFrac,
-      y: yFrac,
-      size: sizeFrac
+      x: currentXFrac,
+      y: currentYFrac,
+      size: currentSizeFrac,
+      radius: root.radiusRatio
     })]
     saveProc.running = true
   }
 
-  // When no geometry exists anywhere for this shape yet, the focused display's
-  // bubble seeds it: visible at the shape's defaults, then persisted so the
-  // CLI and the stream agree from that point on.
-  property bool seeding: false
-  onVisibleChanged: {
-    camera.deviceBusy = false
-    Qt.callLater(root.seedIfNeeded)
-  }
-  onShapeChanged: {
-    dragX = -1
-    dragY = -1
-    dragSize = -1
-    seeding = false
-    Qt.callLater(root.seedIfNeeded)
-  }
-
-  function seedIfNeeded() {
-    if (!visible || parkedHere || haveShapeAnywhere || seeding) return
-    seeding = true
+  function snapCorner(corner) {
+    var sw = fracW
+    var sh = fracH
+    var nx = 0.03
+    var ny = 0.04
+    if (corner === "bottom-right" || corner === "br") {
+      nx = 1.0 - sw - 0.03
+      ny = 1.0 - sh - 0.04
+    } else if (corner === "bottom-left" || corner === "bl") {
+      nx = 0.03
+      ny = 1.0 - sh - 0.04
+    } else if (corner === "top-right" || corner === "tr") {
+      nx = 1.0 - sw - 0.03
+      ny = 0.04
+    } else if (corner === "top-left" || corner === "tl") {
+      nx = 0.03
+      ny = 0.04
+    }
+    currentXFrac = Math.max(0, Math.min(nx, 1 - sw))
+    currentYFrac = Math.max(0, Math.min(ny, 1 - sh))
     saveNow()
   }
 
-  // ── camera ────────────────────────────────────────────────────────────────────
+  // ── camera capture pipeline ──────────────────────────────────────────────────
   MediaDevices { id: mediaDevices }
-
-  // state wins, config.env is the fallback (state may not carry it yet).
-  readonly property bool flip: cam && cam.flip !== null && cam.flip !== undefined
-    ? cam.flip === true : (service && service.camConf ? service.camConf.flip === true : true)
 
   Camera {
     id: camera
@@ -208,55 +288,94 @@ PanelWindow {
 
   readonly property bool videoShowing: camera.active && !camera.deviceBusy && camera.cameraDevice !== null
 
-  // ── the bubble ───────────────────────────────────────────────────────────────
+  // ── user interaction state (Zero-flicker hover management) ──────────────────
+  property bool controlsVisible: false
+  property bool sliderActive: false
+  property point moveOriginMouse
+  property point moveOriginFrac
+  property point resizeOriginMouse
+  property real resizeOriginSize: -1
+  property bool moveDirty: false
+  property bool resizeDirty: false
+
+  readonly property bool moving: moveArea.pressed
+  readonly property bool resizing: resizeArea.pressed
+
+  // ── the floating bubble item ────────────────────────────────────────────────
   Rectangle {
     id: frame
     x: Math.round(root.xPos)
     y: Math.round(root.yPos)
     width: Math.round(root.boxWidth)
     height: Math.round(root.boxHeight)
-    radius: root.radius
+    radius: root.effectiveRadius
     color: Color.background
-    border.width: root.resizing || root.moving ? 2 : Style.normalBorderWidth
-    border.color: root.hots ? Color.urgent : Style.normalBorderColor
+    border.width: Style.normalBorderWidth
+    border.color: Style.normalBorderColor
 
-    // camera feed, masked to the shape
+    // ── Passive Hover Detection (Never flickers, never re-renders video) ───────
+    HoverHandler {
+      id: bubbleHover
+      onHoveredChanged: {
+        if (hovered) {
+          hoverGraceTimer.stop()
+          root.controlsVisible = true
+        } else {
+          hoverGraceTimer.restart()
+        }
+      }
+    }
+
+    Timer {
+      id: hoverGraceTimer
+      interval: 450
+      onTriggered: {
+        if (!bubbleHover.hovered && !root.moving && !root.resizing && !root.sliderActive) {
+          root.controlsVisible = false
+        }
+      }
+    }
+
+    // ── 1. Live video output with horizontal mirror & corner rounding ─────────
     Item {
       id: videoHost
       anchors.fill: parent
       anchors.margins: 1
       visible: root.videoShowing
 
+      // MultiEffect applied only when rounding is active (> 0)
+      layer.enabled: root.effectiveRadius > 0
+      layer.smooth: true
+      layer.effect: MultiEffect {
+        maskEnabled: true
+        maskSource: maskRect
+        maskThresholdMin: 0.5
+        maskSpreadAtMin: 1.0
+      }
+
       VideoOutput {
         id: videoOut
         anchors.fill: parent
         fillMode: VideoOutput.PreserveAspectCrop
-        scale: root.flip ? -1 : 1
         transformOrigin: Item.Center
-        layer.enabled: true
-        layer.effect: MultiEffect {
-          maskEnabled: true
-          maskSource: videoMask
-          maskThresholdMin: 0.5
-          maskSpreadAtMin: 1.0
-        }
-      }
-
-      Item {
-        id: videoMask
-        anchors.fill: parent
-        visible: false
-        layer.enabled: true
-
-        Rectangle {
-          anchors.fill: parent
-          radius: root.radius
-          color: "black"
+        transform: Scale {
+          xScale: root.flip ? -1 : 1
+          origin.x: videoOut.width / 2
         }
       }
     }
 
-    // placeholder: camera loading or no camera device plugged in
+    // Mask source for MultiEffect
+    Rectangle {
+      id: maskRect
+      anchors.fill: parent
+      radius: root.effectiveRadius
+      color: "black"
+      visible: false
+      layer.enabled: true
+    }
+
+    // Camera placeholder when waiting for device or camera off
     Item {
       id: placeholder
       anchors.fill: parent
@@ -265,11 +384,11 @@ PanelWindow {
 
       Rectangle {
         anchors.fill: parent
-        radius: root.radius
-        color: Qt.alpha(Color.background, 0.55)
+        radius: root.effectiveRadius
+        color: Qt.alpha(Color.background, 0.65)
       }
 
-      Item { // glyph: drawn shapes, no icon font needed
+      Item {
         anchors.centerIn: parent
         width: parent.width * 0.24
         height: width
@@ -291,180 +410,492 @@ PanelWindow {
       }
     }
 
-    // ── move ────────────────────────────────────────────────────────────────────
+    // ── Active Outline Highlight (Smooth transition, never affects video) ─────
+    Rectangle {
+      id: activeHighlight
+      anchors.fill: parent
+      radius: root.effectiveRadius
+      color: "transparent"
+      border.width: root.moving || root.resizing ? 2 : 1
+      border.color: root.moving || root.resizing ? Color.urgent : Color.accent
+      opacity: root.moving || root.resizing ? 0.9 : (root.controlsVisible ? 0.5 : 0.0)
+      Behavior on opacity { NumberAnimation { duration: 150 } }
+      z: 5
+    }
+
+    // ── Drag Movement with magnetic edge/corner snapping ─────────────────────
     MouseArea {
       id: moveArea
       anchors.fill: parent
-      hoverEnabled: true
+      hoverEnabled: false
       acceptedButtons: Qt.LeftButton
       cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+      z: 10
 
       onPressed: (mouse) => {
         var pt = moveArea.mapToItem(null, mouse.x, mouse.y)
         root.moveOriginMouse = Qt.point(pt.x, pt.y)
-        root.moveOriginFrac = Qt.point(root.xFrac, root.yFrac)
-        root.dragX = root.xFrac
-        root.dragY = root.yFrac
+        root.moveOriginFrac = Qt.point(root.currentXFrac, root.currentYFrac)
         root.moveDirty = false
       }
       onPositionChanged: (mouse) => {
         if (!pressed) return
         var pt = moveArea.mapToItem(null, mouse.x, mouse.y)
-        var nx = root.moveOriginFrac.x + (pt.x - root.moveOriginMouse.x) / root.logicalW
-        var ny = root.moveOriginFrac.y + (pt.y - root.moveOriginMouse.y) / root.logicalH
-        root.dragX = Math.max(0, Math.min(nx, 1 - root.sizeFrac))
-        root.dragY = Math.max(0, Math.min(ny, 1 - root.fracH))
+        var rawX = root.moveOriginFrac.x + (pt.x - root.moveOriginMouse.x) / root.logicalW
+        var rawY = root.moveOriginFrac.y + (pt.y - root.moveOriginMouse.y) / root.logicalH
+        var maxX = 1 - root.fracW
+        var maxY = 1 - root.fracH
+        var nx = Math.max(0, Math.min(rawX, maxX))
+        var ny = Math.max(0, Math.min(rawY, maxY))
+
+        // Magnetic snap: within 4% of display edges, snap with clean margin
+        var marginX = 0.03
+        var marginY = 0.04
+        var snapDist = 0.04
+        if (nx < marginX + snapDist) nx = marginX
+        else if (nx > maxX - marginX - snapDist) nx = maxX - marginX
+
+        if (ny < marginY + snapDist) ny = marginY
+        else if (ny > maxY - marginY - snapDist) ny = maxY - marginY
+
+        root.currentXFrac = nx
+        root.currentYFrac = ny
         root.moveDirty = true
       }
       onReleased: root.commitMove()
       onCanceled: root.commitMove()
     }
 
-    // ── hover pill: shape switch + hide ────────────────────────────────────────
-    readonly property bool hots: moveArea.containsMouse || resizeArea.containsMouse
-      || pillBtnCircle.containsMouse || pillBtnSquare.containsMouse
-      || pillBtnWide.containsMouse || pillBtnOff.containsMouse
-
+    // ── HUD Controls Card (Top Pill + Rounded Corner Slider) ─────────────────
     Item {
-      id: pill
-      visible: root.hots || root.resizing
+      id: hudCard
       anchors.top: parent.top
-      anchors.topMargin: Style.space(2)
+      anchors.topMargin: Style.space(4)
       anchors.horizontalCenter: parent.horizontalCenter
-      height: Style.space(24)
+      width: Math.min(parent.width - Style.space(10), Style.space(270))
+      height: hudColumn.height + Style.space(8)
+      z: 20
+
+      opacity: (root.controlsVisible || root.moving || root.resizing || root.sliderActive) ? 1.0 : 0.0
+      visible: opacity > 0.01
+      Behavior on opacity { NumberAnimation { duration: 160 } }
 
       Rectangle {
         anchors.fill: parent
-        anchors.margins: Style.space(-2)
-        radius: height / 2
+        radius: Style.cornerRadius > 0 ? Style.cornerRadius : 8
         color: Qt.alpha(Color.background, 0.94)
         border.width: Style.normalBorderWidth
         border.color: Style.normalBorderColor
       }
 
-      Row {
-        id: pillRow
+      Column {
+        id: hudColumn
         anchors.centerIn: parent
-        spacing: Style.space(2)
+        spacing: Style.space(3)
+        width: parent.width - Style.space(8)
 
-        MouseArea {
-          id: pillBtnCircle
-          width: pill.height
-          height: pill.height
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.runCmd(["cam", "shape", "circle"])
+        // ── Row 1: Shapes (1:1, 16:9, Circle), Snap Corners, Flip, Close ───────
+        Row {
+          id: toolRow
+          anchors.horizontalCenter: parent.horizontalCenter
+          spacing: Style.space(2)
 
-          Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: root.shape === "circle" ? Qt.alpha(Color.accent, 0.25)
-                 : parent.containsMouse ? Qt.alpha(Color.accent, 0.10) : "transparent"
+          // 1:1 Square Button
+          MouseArea {
+            width: Style.space(24)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.runCmd(["cam", "shape", "1:1"])
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 4
+              color: root.shape === "1:1" ? Qt.alpha(Color.accent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+              border.width: root.shape === "1:1" ? 1 : 0
+              border.color: Color.accent
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "1:1"
+              font.pixelSize: 10
+              font.bold: true
+              color: root.shape === "1:1" ? Color.urgent : Style.normalBorderColor
+            }
           }
+
+          // 16:9 Widescreen Button
+          MouseArea {
+            width: Style.space(28)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.runCmd(["cam", "shape", "16:9"])
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 4
+              color: root.shape === "16:9" ? Qt.alpha(Color.accent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+              border.width: root.shape === "16:9" ? 1 : 0
+              border.color: Color.accent
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "16:9"
+              font.pixelSize: 10
+              font.bold: true
+              color: root.shape === "16:9" ? Color.urgent : Style.normalBorderColor
+            }
+          }
+
+          // Circle Button
+          MouseArea {
+            width: Style.space(24)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.runCmd(["cam", "shape", "circle"])
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 4
+              color: root.shape === "circle" ? Qt.alpha(Color.accent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+              border.width: root.shape === "circle" ? 1 : 0
+              border.color: Color.accent
+            }
+            Rectangle {
+              anchors.centerIn: parent
+              width: 11
+              height: 11
+              radius: 6
+              color: "transparent"
+              border.width: 2
+              border.color: root.shape === "circle" ? Color.urgent : Style.normalBorderColor
+            }
+          }
+
+          // Separator
           Rectangle {
-            anchors.centerIn: parent
-            width: parent.height * 0.36
-            height: width
-            radius: width / 2
-            color: "transparent"
-            border.width: 2
-            border.color: Color.urgent
+            width: 1
+            height: Style.space(14)
+            anchors.verticalCenter: parent.verticalCenter
+            color: Style.normalBorderColor
+          }
+
+          // Snap: Top-Left
+          MouseArea {
+            width: Style.space(20)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.snapCorner("top-left")
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: parent.containsMouse ? Qt.alpha(Color.accent, 0.15) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "↖"
+              color: parent.containsMouse ? Color.urgent : Style.normalBorderColor
+              font.pixelSize: 11
+              font.bold: true
+            }
+          }
+
+          // Snap: Top-Right
+          MouseArea {
+            width: Style.space(20)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.snapCorner("top-right")
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: parent.containsMouse ? Qt.alpha(Color.accent, 0.15) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "↗"
+              color: parent.containsMouse ? Color.urgent : Style.normalBorderColor
+              font.pixelSize: 11
+              font.bold: true
+            }
+          }
+
+          // Snap: Bottom-Left
+          MouseArea {
+            width: Style.space(20)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.snapCorner("bottom-left")
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: parent.containsMouse ? Qt.alpha(Color.accent, 0.15) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "↙"
+              color: parent.containsMouse ? Color.urgent : Style.normalBorderColor
+              font.pixelSize: 11
+              font.bold: true
+            }
+          }
+
+          // Snap: Bottom-Right
+          MouseArea {
+            width: Style.space(20)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.snapCorner("bottom-right")
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: parent.containsMouse ? Qt.alpha(Color.accent, 0.15) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "↘"
+              color: parent.containsMouse ? Color.urgent : Style.normalBorderColor
+              font.pixelSize: 11
+              font.bold: true
+            }
+          }
+
+          // Separator
+          Rectangle {
+            width: 1
+            height: Style.space(14)
+            anchors.verticalCenter: parent.verticalCenter
+            color: Style.normalBorderColor
+          }
+
+          // Mirror / Flip Toggle
+          MouseArea {
+            width: Style.space(22)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.runCmd(["cam", "flip", root.flip ? "false" : "true"])
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: root.flip ? Qt.alpha(Color.accent, 0.25)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "⇄"
+              color: root.flip ? Color.urgent : Style.normalBorderColor
+              font.pixelSize: 12
+              font.bold: true
+            }
+          }
+
+          // Separator
+          Rectangle {
+            width: 1
+            height: Style.space(14)
+            anchors.verticalCenter: parent.verticalCenter
+            color: Style.normalBorderColor
+          }
+
+          // Hide / Close Button
+          MouseArea {
+            width: Style.space(22)
+            height: Style.space(22)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.runCmd(["cam", "off"])
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 3
+              color: parent.pressed ? Qt.alpha(Color.urgent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.urgent, 0.15) : "transparent"
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "×"
+              color: Color.urgent
+              font.pixelSize: 14
+              font.bold: true
+            }
           }
         }
 
-        MouseArea {
-          id: pillBtnSquare
-          width: pill.height
-          height: pill.height
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.runCmd(["cam", "shape", "1:1"])
+        // ── Row 2: Corner Rounding Slider ─────────────────────────────────────
+        Row {
+          id: sliderRow
+          anchors.horizontalCenter: parent.horizontalCenter
+          spacing: Style.space(4)
+          visible: root.shape !== "circle"
 
-          Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: root.shape === "1:1" ? Qt.alpha(Color.accent, 0.25)
-                 : parent.containsMouse ? Qt.alpha(Color.accent, 0.10) : "transparent"
-          }
-          Rectangle {
-            anchors.centerIn: parent
-            width: parent.height * 0.30
-            height: width
-            radius: 3
-            color: "transparent"
-            border.width: 2
-            border.color: Color.urgent
-          }
-        }
-
-        MouseArea {
-          id: pillBtnWide
-          width: pill.height
-          height: pill.height
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.runCmd(["cam", "shape", "16:9"])
-
-          Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: root.shape === "16:9" ? Qt.alpha(Color.accent, 0.25)
-                 : parent.containsMouse ? Qt.alpha(Color.accent, 0.10) : "transparent"
-          }
-          Rectangle {
-            anchors.centerIn: parent
-            width: parent.height * 0.40
-            height: parent.height * 0.24
-            radius: 3
-            color: "transparent"
-            border.width: 2
-            border.color: Color.urgent
-          }
-        }
-
-        MouseArea {
-          id: pillBtnOff
-          width: pill.height
-          height: pill.height
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.runCmd(["cam", "off"])
-
-          Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: parent.pressed ? Qt.alpha(Color.urgent, 0.25)
-                 : parent.containsMouse ? Qt.alpha(Color.urgent, 0.10) : "transparent"
-          }
           Text {
-            anchors.centerIn: parent
-            text: "×"
-            textFormat: Text.PlainText
-            color: Color.urgent
-            font.pixelSize: Math.round(pill.height * 0.55)
+            anchors.verticalCenter: parent.verticalCenter
+            text: "╭╮"
+            font.pixelSize: 10
+            color: Style.normalBorderColor
+          }
+
+          // Quick Preset: 0px Sharp
+          MouseArea {
+            width: Style.space(18)
+            height: Style.space(18)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.radiusRatio = 0.0
+              root.saveNow()
+            }
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 2
+              color: root.radiusRatio < 0.04 ? Qt.alpha(Color.accent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+              border.width: 1
+              border.color: root.radiusRatio < 0.04 ? Color.accent : Style.normalBorderColor
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "0"
+              font.pixelSize: 9
+              font.bold: true
+              color: root.radiusRatio < 0.04 ? Color.urgent : Style.normalBorderColor
+            }
+          }
+
+          // Slider Track
+          Rectangle {
+            id: sliderTrack
+            width: Style.space(100)
+            height: Style.space(6)
+            radius: height / 2
+            anchors.verticalCenter: parent.verticalCenter
+            color: Qt.alpha(Color.foreground, 0.18)
+
+            // Active Track Fill
+            Rectangle {
+              width: Math.max(0, Math.min(sliderTrack.width, root.radiusRatio * sliderTrack.width))
+              height: parent.height
+              radius: parent.radius
+              color: Color.accent
+            }
+
+            // Draggable Thumb Handle
+            Rectangle {
+              x: Math.max(0, Math.min(sliderTrack.width - width, root.radiusRatio * (sliderTrack.width - width)))
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(12)
+              height: width
+              radius: width / 2
+              color: sliderMouse.containsMouse || sliderMouse.pressed ? Color.urgent : Color.accent
+              border.width: 2
+              border.color: "#ffffff"
+            }
+
+            MouseArea {
+              id: sliderMouse
+              anchors.fill: parent
+              anchors.margins: -Style.space(6)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              acceptedButtons: Qt.LeftButton
+
+              function updateRatio(mouseX) {
+                var localX = mouseX - Style.space(6)
+                var ratio = Math.max(0.0, Math.min(1.0, localX / sliderTrack.width))
+                root.radiusRatio = ratio
+              }
+
+              onPressed: (mouse) => {
+                root.sliderActive = true
+                updateRatio(mouse.x)
+              }
+              onPositionChanged: (mouse) => {
+                if (pressed) updateRatio(mouse.x)
+              }
+              onReleased: {
+                root.sliderActive = false
+                root.saveNow()
+              }
+              onCanceled: {
+                root.sliderActive = false
+                root.saveNow()
+              }
+            }
+          }
+
+          // Quick Preset: Max Round
+          MouseArea {
+            width: Style.space(26)
+            height: Style.space(18)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.radiusRatio = 1.0
+              root.saveNow()
+            }
+
+            Rectangle {
+              anchors.fill: parent
+              radius: 2
+              color: root.radiusRatio > 0.95 ? Qt.alpha(Color.accent, 0.3)
+                   : parent.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+              border.width: 1
+              border.color: root.radiusRatio > 0.95 ? Color.accent : Style.normalBorderColor
+            }
+            Text {
+              anchors.centerIn: parent
+              text: "Max"
+              font.pixelSize: 8
+              font.bold: true
+              color: root.radiusRatio > 0.95 ? Color.urgent : Style.normalBorderColor
+            }
+          }
+
+          // Radius Pixel Value Badge
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.effectiveRadius === 0 ? "Square" : (Math.round(root.effectiveRadius) + "px")
+            font.pixelSize: 9
             font.bold: true
+            color: Color.accent
           }
         }
       }
     }
 
-    // ── resize grip (bottom-right, keeps the shape ratio) ──────────────────────
+    // ── Resize Grip (Bottom-right corner, preserves aspect ratio) ─────────────
     MouseArea {
       id: resizeArea
-      width: Style.space(34)
-      height: Style.space(34)
+      width: Style.space(32)
+      height: Style.space(32)
       anchors.bottom: parent.bottom
       anchors.right: parent.right
       hoverEnabled: true
       cursorShape: Qt.SizeFDiagCursor
       acceptedButtons: Qt.LeftButton
-      visible: root.hots
+      visible: root.controlsVisible || root.resizing
+      z: 25
 
       onPressed: (mouse) => {
         var pt = resizeArea.mapToItem(null, mouse.x, mouse.y)
         root.resizeOriginMouse = Qt.point(pt.x, pt.y)
-        root.resizeOriginSize = root.sizeFrac
-        root.dragSize = root.sizeFrac
+        root.resizeOriginSize = root.currentSizeFrac
         root.resizeDirty = false
       }
       onPositionChanged: (mouse) => {
@@ -472,7 +903,7 @@ PanelWindow {
         var pt = resizeArea.mapToItem(null, mouse.x, mouse.y)
         var delta = ((pt.x - root.resizeOriginMouse.x) + (pt.y - root.resizeOriginMouse.y)) / 2
         var ns = root.resizeOriginSize + delta / root.logicalW
-        root.dragSize = Math.max(0.05, Math.min(0.75, ns))
+        root.currentSizeFrac = Math.max(0.06, Math.min(0.70, ns))
         root.resizeDirty = true
       }
       onReleased: root.commitResize()
