@@ -105,9 +105,13 @@ PanelWindow {
   // ── monitor resolution & visibility ──────────────────────────────────────────
   readonly property string screenName: screen && screen.name ? String(screen.name) : ""
   readonly property string focusScreenName: {
-    var m = Hyprland.focusedMonitor
-    return m && m.name ? String(m.name)
-      : (Quickshell.screens.length ? String(Quickshell.screens[0].name) : "")
+    try {
+      if (typeof Hyprland !== "undefined" && Hyprland && Hyprland.focusedMonitor && Hyprland.focusedMonitor.name) {
+        return String(Hyprland.focusedMonitor.name)
+      }
+    } catch (e) {}
+    return Quickshell.screens && Quickshell.screens.length > 0 && Quickshell.screens[0].name
+      ? String(Quickshell.screens[0].name) : ""
   }
 
   readonly property real logicalW: screen && screen.width > 0 ? screen.width : 1920
@@ -124,16 +128,20 @@ PanelWindow {
   }
 
   readonly property bool isTargetScreen: {
-    if (Quickshell.screens.length <= 1) return true
+    if (!Quickshell.screens || Quickshell.screens.length <= 1) return true
     if (shapeGeom !== null && allGeom && allGeom[myKey]) return true
-    if (screenName === focusScreenName) return true
+    if (focusScreenName && screenName === focusScreenName) return true
     var firstScreen = Quickshell.screens.length > 0 ? String(Quickshell.screens[0].name || "") : ""
     return screenName === firstScreen
   }
 
   // Check whether omastream app is running or streaming is active
-  readonly property bool appRunning: service ? service.appRunning : false
-  readonly property bool canShowCamera: service ? (service.streaming || appRunning) : true
+  readonly property bool appRunning: {
+    if (service && service.appRunning) return true
+    if (localState && localState.appRunning === true) return true
+    return false
+  }
+  readonly property bool canShowCamera: service ? (service.streaming || appRunning) : (localState.streaming === true || appRunning)
 
   // Visible ONLY when requested, on target screen, AND either live streaming or app is open
   visible: root.camVisible && root.isTargetScreen && root.canShowCamera

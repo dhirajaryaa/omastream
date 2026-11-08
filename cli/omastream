@@ -295,7 +295,7 @@ rtmp_base() { echo "$(cfg RTMP_URL rtmp://a.rtmp.youtube.com/live2)"; }
 
 mask_key() { # hides the stream key in user-facing output (RTMP endpoints only)
   local out="${1:-}"
-  [[ $out == rtmp://* ]] || { echo "$out"; return; }
+  [[ $out == rtmp://* || $out == rtmps://* ]] || { echo "$out"; return; }
   sed -E 's#/[^/ ?&=]{4,}(/|#|$)#/<stream-key>#' <<<"$out"
 }
 
@@ -321,18 +321,78 @@ cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
   done
 
   local output mode
+  local -a targets=()
+  local -a target_names=()
+  local ffmpeg_pid=0
+
   if [[ -n $file_out ]]; then
-    output="$file_out"; mode="file"
+    output="$file_out"
+    mode="file"
+    targets+=("$file_out")
+    target_names+=("File")
   else
-    local key
-    key="$(cfg STREAM_KEY '')"
-    if [[ -z $key ]]; then
-      die "no STREAM_KEY in $CONFIG_FILE
-set it:       omastream-cli config stream-key '<your-youtube-key>'
-local check:  omastream-cli test"
+    # ── Multi-Platform Parallel Resolution ──
+    # YouTube Live (supports YOUTUBE_KEY or STREAM_KEY)
+    local yt_key yt_enabled
+    yt_key="$(cfg YOUTUBE_KEY '')"
+    [[ -z $yt_key ]] && yt_key="$(cfg STREAM_KEY '')"
+    yt_enabled="$(cfg_bool YOUTUBE_ENABLED true)"
+    if [[ $yt_enabled == true && -n $yt_key ]]; then
+      if [[ $yt_key == rtmp://* || $yt_key == rtmps://* ]]; then
+        targets+=("$yt_key")
+      else
+        targets+=("$(rtmp_base)/$yt_key")
+      fi
+      target_names+=("YouTube")
     fi
-    if [[ $key == rtmp://* ]]; then output="$key"; else output="$(rtmp_base)/$key"; fi
-    mode="stream"
+
+    # Twitch
+    local twitch_key twitch_enabled
+    twitch_key="$(cfg TWITCH_KEY '')"
+    twitch_enabled="$(cfg_bool TWITCH_ENABLED false)"
+    if [[ $twitch_enabled == true && -n $twitch_key ]]; then
+      if [[ $twitch_key == rtmp://* || $twitch_key == rtmps://* ]]; then
+        targets+=("$twitch_key")
+      else
+        targets+=("rtmp://live.twitch.tv/app/$twitch_key")
+      fi
+      target_names+=("Twitch")
+    fi
+
+    # Kick
+    local kick_key kick_enabled kick_url
+    kick_key="$(cfg KICK_KEY '')"
+    kick_enabled="$(cfg_bool KICK_ENABLED false)"
+    kick_url="$(cfg KICK_URL 'rtmps://fa723fc1b171.global-contribute.live-video.net/app')"
+    kick_url="${kick_url%/}"
+    if [[ $kick_enabled == true && -n $kick_key ]]; then
+      if [[ $kick_key == rtmp://* || $kick_key == rtmps://* ]]; then
+        targets+=("$kick_key")
+      else
+        targets+=("$kick_url/$kick_key")
+      fi
+      target_names+=("Kick")
+    fi
+
+    if [[ ${#targets[@]} -eq 0 ]]; then
+      die "no streaming platform enabled with a valid stream key.
+Configure at least one platform:
+  omastream-cli config set YOUTUBE_KEY '<key>'
+  omastream-cli config set TWITCH_KEY '<key>'
+  omastream-cli config set KICK_KEY '<key>'
+or launch the Omastream window to configure."
+    fi
+
+    if [[ ${#targets[@]} -eq 1 ]]; then
+      output="${targets[0]}"
+      mode="stream"
+    else
+      # Multi-platform: pipe to FIFO and duplicate with ffmpeg tee muxer
+      output="$STATE_DIR/stream.fifo"
+      mode="multi-stream"
+      rm -f "$output"
+      mkfifo "$output"
+    fi
   fi
 
   if [[ "$(state_get '.streaming' false)" == "true" ]]; then
@@ -406,6 +466,19 @@ local check:  omastream-cli test"
   fi
   log "start requested ($mode)"
 
+  # Multi-platform: start ffmpeg tee multiplexer in background
+  if [[ $mode == "multi-stream" ]]; then
+    local -a tee_parts=()
+    for t in "${targets[@]}"; do
+      tee_parts+=("[f=flv:onfail=ignore]$t")
+    done
+    local tee_spec
+    tee_spec="$(IFS='|'; echo "${tee_parts[*]}")"
+    need ffmpeg
+    ffmpeg -loglevel error -y -i "$output" -c copy -map 0:v? -map 0:a? -f tee "$tee_spec" >>"$LOG_FILE" 2>&1 < /dev/null &
+    ffmpeg_pid=$!
+  fi
+
   # spawn (direct child → the pid we track; no setsid wrapper to lose it)
   "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
   local pid=$!
@@ -417,7 +490,9 @@ local check:  omastream-cli test"
   for ((i = 0; i < 200; i++)); do
     if ! gsr_pid_alive "$pid"; then
       tail -n 15 "$LOG_FILE" >&2
-      state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+      [[ $ffmpeg_pid -gt 0 ]] && kill -INT "$ffmpeg_pid" 2>/dev/null
+      rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
+      state_merge '{"streaming":false,"pid":0,"ffmpeg_pid":0}' 2>/dev/null
       die "gpu-screen-recorder exited during startup (see $LOG_FILE)"
     fi
     if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
@@ -428,25 +503,34 @@ local check:  omastream-cli test"
   if [[ $ok != true ]]; then
     tail -n 15 "$LOG_FILE" >&2
     kill -INT "$pid" 2>/dev/null
-    state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+    [[ $ffmpeg_pid -gt 0 ]] && kill -INT "$ffmpeg_pid" 2>/dev/null
+    rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
+    state_merge '{"streaming":false,"pid":0,"ffmpeg_pid":0}' 2>/dev/null
     die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
   fi
 
-  state_merge "{\"streaming\":true,\"pid\":$pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"resolution\":\"$res\",\"lastError\":null,\"stopRequested\":false}"
-  log "running: pid=$pid mode=$mode"
+  local plat_str
+  plat_str="$(IFS=', '; echo "${target_names[*]}")"
+  state_merge "{\"streaming\":true,\"pid\":$pid,\"ffmpeg_pid\":$ffmpeg_pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"platforms\":\"$plat_str\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"resolution\":\"$res\",\"lastError\":null,\"stopRequested\":false}"
+  log "running: pid=$pid mode=$mode platforms=$plat_str"
 
   # watchdog — flips state the moment the recorder dies, whatever the cause
-  "$0" __monitor "$pid" >/dev/null 2>&1 &
+  "$0" __monitor "$pid" "$ffmpeg_pid" >/dev/null 2>&1 &
   disown 2>/dev/null || true
 
-  echo "live (pid $pid) → $(mask_key "$output")"
+  if [[ $mode == "multi-stream" ]]; then
+    echo "live (pid $pid) → $plat_str [multi-stream]"
+  else
+    echo "live (pid $pid) → $(mask_key "$output")"
+  fi
 }
 
 # ── stop ────────────────────────────────────────────────────────────────────
 cmd_stop() {
   ensure_dirs
-  local pid handled=false i
+  local pid handled=false i fpid
   pid="$(state_get '.pid' 0)"
+  fpid="$(state_get '.ffmpeg_pid' 0)"
 
   # tell the watchdog a stop is on purpose before touching the process
   [[ $pid =~ ^[0-9]+$ ]] && [[ $pid -gt 0 ]] && state_merge '{"stopRequested":true}'
@@ -484,11 +568,26 @@ cmd_stop() {
       gsr_ours_running && pkill -u "$UID" -KILL -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" 2>/dev/null
     fi
   fi
+
+  # Stop ffmpeg relay if active
+  if [[ $fpid =~ ^[0-9]+$ ]] && [[ $fpid -gt 0 ]] && kill -0 "$fpid" 2>/dev/null; then
+    for ((i = 0; i < 30; i++)); do
+      kill -0 "$fpid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$fpid" 2>/dev/null; then
+      kill -INT "$fpid" 2>/dev/null
+      sleep 0.2
+      kill -0 "$fpid" 2>/dev/null && kill -KILL "$fpid" 2>/dev/null
+    fi
+  fi
+  rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
+
   if [[ $handled != true && "$(state_get '.streaming' false)" != "true" ]]; then
     die "nothing to stop"
   fi
 
-  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null,\"cam\":{\"visible\":false}}"
+  state_merge "{\"streaming\":false,\"pid\":0,\"ffmpeg_pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null,\"cam\":{\"visible\":false}}"
   rm -rf "$SOCK_DIR" 2>/dev/null || true
   log "stopped"
   echo "stopped"
@@ -533,16 +632,22 @@ cmd_status() {
     return 0
   fi
 
+  local platforms
+  platforms="$(jq -r '.platforms // empty' <<<"$raw" 2>/dev/null)"
   if [[ $check_flag == true ]]; then
     echo "streaming (pid $pid, $(mmss "$elapsed"))"
     return 0
   fi
   if [[ $json_flag == true ]]; then
-    printf '{"streaming":true,"pid":%s,"elapsed":%s,"mode":"%s","output":"%s"}\n' \
-      "$pid" "$elapsed" "$mode" "$(mask_key "$out")"
+    printf '{"streaming":true,"pid":%s,"elapsed":%s,"mode":"%s","platforms":"%s","output":"%s"}\n' \
+      "$pid" "$elapsed" "$mode" "$platforms" "$(mask_key "$out")"
     return 0
   fi
-  echo "streaming (pid $pid) — $(mmss "$elapsed") on $(mask_key "$out")"
+  if [[ -n $platforms ]]; then
+    echo "streaming (pid $pid) — $(mmss "$elapsed") on $platforms"
+  else
+    echo "streaming (pid $pid) — $(mmss "$elapsed") on $(mask_key "$out")"
+  fi
 }
 
 # ── local pipeline test ─────────────────────────────────────────────────────
@@ -697,19 +802,33 @@ create_config() {
   mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
   [[ -f $CONFIG_FILE ]] && return 0
   cat > "$CONFIG_FILE" <<'ENV'
-# omastream — stream to YouTube Live. Keep this file private, never commit it.
+# omastream — parallel multi-streaming studio for Omarchy & Arch Linux. Keep private, never commit.
 
-# ── YouTube Live ─────────────────────────────────────────────────────────────
-# Studio → Go live → Stream settings → Stream key. A full rtmp:// URL works too.
+# ── Multi-Platform Streaming (YouTube, Twitch, Kick) ─────────────────────────
+# YouTube Live:
+# Studio → Go live → Stream settings → Stream key.
+YOUTUBE_KEY=
+YOUTUBE_ENABLED=true
 STREAM_KEY=
+
+# Twitch:
+# Creator Dashboard → Settings → Stream → Primary Stream key
+TWITCH_KEY=
+TWITCH_ENABLED=false
+
+# Kick:
+# Creator Dashboard → Settings → Stream Key
+KICK_KEY=
+KICK_URL=rtmps://fa723fc1b171.global-contribute.live-video.net/app
+KICK_ENABLED=false
 
 # ── video ────────────────────────────────────────────────────────────────────
 # STREAM_RESOLUTION=auto | 1920x1080 | 1280x720 | 2560x1440 | 3840x2160 (or any WxH)
 STREAM_RESOLUTION=auto
-# h264  = YouTube RTMP ingest (VA-API QuickSync on Intel)
-# hevc  = try it if you like; YouTube RTMP may reject it
+# h264  = standard RTMP ingest (VA-API QuickSync on Intel, NVENC on NVIDIA)
+# hevc  = high efficiency (if supported by ingest)
 VIDEO_CODEC=h264
-VIDEO_BITRATE=4500     # kbps, CBR — 4500 ≈ YouTube's recommended 1080p30
+VIDEO_BITRATE=4500     # kbps, CBR — 4500 ≈ recommended 1080p30
 FPS=30
 SCREEN_SHARPNESS=off   # off | crisp | high | ultra (sharp text for low-res monitors)
 
@@ -721,7 +840,7 @@ MIC_ENABLED=true       # false removes the mic track
 # ── camera ───────────────────────────────────────────────────────────────────
 CAM_DEVICE=/dev/video0
 CAM_FLIP=true          # mirrored (natural selfie view)
-CAM_RECORD=true        # composite the camera into the YouTube frame while shown
+CAM_RECORD=true        # composite the camera into the stream frame while shown
 CAM_FIT=aspect         # aspect = no distortion; shape = region follows bubble shape
 CAM_ON_START=false     # show the camera bubble whenever a stream starts
 DEFAULT_CAM_SHAPE=16:9 # circle | 1:1 | 16:9
@@ -757,10 +876,10 @@ cmd_config() {
     set)
       local value allowed
       key="${1:-}"; value="${2:-}"
-      # app-facing settings; keep this list to what gpu-screen-recorder can use
-      allowed="|STREAM_KEY|STREAM_RESOLUTION|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|SCREEN_SHARPNESS|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
+      # app-facing settings; keep this list to what gpu-screen-recorder and multi-streaming can use
+      allowed="|STREAM_KEY|YOUTUBE_KEY|YOUTUBE_ENABLED|TWITCH_KEY|TWITCH_ENABLED|KICK_KEY|KICK_URL|KICK_ENABLED|STREAM_RESOLUTION|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|SCREEN_SHARPNESS|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
       [[ $value != *[\"\'$'\n'\\]* ]] || die "invalid value for $key"
-      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY STREAM_RESOLUTION VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED SCREEN_SHARPNESS CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
+      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY YOUTUBE_KEY YOUTUBE_ENABLED TWITCH_KEY TWITCH_ENABLED KICK_KEY KICK_URL KICK_ENABLED STREAM_RESOLUTION VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED SCREEN_SHARPNESS CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
       create_config
       if grep -q "^${key}=" "$CONFIG_FILE"; then
         sed -i "s#^${key}=.*#${key}='$value'#" "$CONFIG_FILE"
@@ -768,14 +887,14 @@ cmd_config() {
         printf "\n%s='%s'\n" "$key" "$value" >> "$CONFIG_FILE"
       fi
       chmod 600 "$CONFIG_FILE"
-      if [[ $key == STREAM_KEY ]]; then
-        echo "STREAM_KEY saved (kept private in $CONFIG_FILE)"
+      if [[ $key == *KEY ]]; then
+        echo "$key saved (kept private in $CONFIG_FILE)"
       else
         echo "$key=$value saved"
       fi ;;
     print)
       [[ -r $CONFIG_FILE ]] || die "no config yet — run: omastream-cli config"
-      sed -E 's#^(STREAM_KEY=).*#\1<redacted>#' "$CONFIG_FILE" ;;
+      sed -E 's#^((STREAM_KEY|YOUTUBE_KEY|TWITCH_KEY|KICK_KEY)=).*#\1<redacted>#' "$CONFIG_FILE" ;;
     *) die "unknown config command: '$sub'" ;;
   esac
 }
@@ -784,7 +903,7 @@ cmd_config() {
 # Waits out the recorder's death; when it dies without a stop being asked,
 # the reason goes into state.json so the app can say it out loud, not hide.
 __monitor() {
-  local pid="${1:-0}" reason
+  local pid="${1:-0}" fpid="${2:-0}" reason
   while gsr_pid_alive "$pid"; do sleep 1; done
   [[ "$(state_get '.streaming' false)" == "true" ]] || return 0
   if [[ "$(state_get '.stopRequested' false)" == "true" ]]; then
@@ -792,8 +911,14 @@ __monitor() {
     return 0
   fi
   rm -rf "$SOCK_DIR" 2>/dev/null || true
+  if [[ $fpid =~ ^[0-9]+$ ]] && [[ $fpid -gt 0 ]] && kill -0 "$fpid" 2>/dev/null; then
+    kill -INT "$fpid" 2>/dev/null || true
+    sleep 0.2
+    kill -0 "$fpid" 2>/dev/null && kill -KILL "$fpid" 2>/dev/null || true
+  fi
+  rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
   reason="$(recorder_fail_line)"
-  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"lastError\":\"$(json_escape "$reason")\",\"stopRequested\":false}"
+  state_merge "{\"streaming\":false,\"pid\":0,\"ffmpeg_pid\":0,\"endedAt\":$(now_ms),\"lastError\":\"$(json_escape "$reason")\",\"stopRequested\":false}"
   log "recorder exited unexpectedly; reason saved for the app: $reason"
 }
 

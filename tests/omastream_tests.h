@@ -36,6 +36,48 @@ private slots:
         QVERIFY(!config.contains("# a full comment — even carrying = — is not a key"));
     }
 
+    void parseMultiPlatformConfig()
+    {
+        const QVariantMap config = Backend::parseConfig(QByteArray(
+            "YOUTUBE_KEY='yt-key-123'\n"
+            "YOUTUBE_ENABLED=true\n"
+            "TWITCH_KEY='live_twitch_abc'\n"
+            "TWITCH_ENABLED=true\n"
+            "KICK_KEY='kick_secret_xyz'\n"
+            "KICK_URL='rtmps://custom.kick.ingest/app'\n"
+            "KICK_ENABLED=false\n"));
+        QCOMPARE(config.value("YOUTUBE_KEY").toString(), "yt-key-123");
+        QCOMPARE(config.value("YOUTUBE_ENABLED").toString(), "true");
+        QCOMPARE(config.value("TWITCH_KEY").toString(), "live_twitch_abc");
+        QCOMPARE(config.value("TWITCH_ENABLED").toString(), "true");
+        QCOMPARE(config.value("KICK_KEY").toString(), "kick_secret_xyz");
+        QCOMPARE(config.value("KICK_URL").toString(), "rtmps://custom.kick.ingest/app");
+        QCOMPARE(config.value("KICK_ENABLED").toString(), "false");
+    }
+
+    void backendMultiPlatformResolution()
+    {
+        QTemporaryDir dir;
+        const QString confPath = dir.path() + "/config.env";
+        const QString statePath = dir.path() + "/state.json";
+        write(confPath,
+            "YOUTUBE_KEY='yt-123'\n"
+            "YOUTUBE_ENABLED=true\n"
+            "TWITCH_KEY='tw-456'\n"
+            "TWITCH_ENABLED=true\n"
+            "KICK_KEY=''\n"
+            "KICK_ENABLED=false\n");
+
+        Backend backend(statePath, confPath, "/bin/true");
+        QCOMPARE(backend.youtubeKey(), QString("yt-123"));
+        QCOMPARE(backend.youtubeEnabled(), true);
+        QCOMPARE(backend.twitchKey(), QString("tw-456"));
+        QCOMPARE(backend.twitchEnabled(), true);
+        QCOMPARE(backend.kickEnabled(), false);
+        QCOMPARE(backend.hasAnyPlatformConfigured(), true);
+        QCOMPARE(backend.activePlatforms(), QString("YouTube + Twitch"));
+    }
+
     void parseStateKeepsValues()
     {
         const QByteArray stateText =

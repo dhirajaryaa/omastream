@@ -20,19 +20,29 @@ Item {
 
   // Detect whether the omastream GUI app window is open
   readonly property bool appRunning: {
-    if (!Hyprland.toplevels || !Hyprland.toplevels.values) return false
-    var list = Hyprland.toplevels.values
-    for (var i = 0; i < list.length; i++) {
-      var item = list[i]
-      if (!item) continue
-      var appId = (item.wayland && item.wayland.appId) ? String(item.wayland.appId) : ""
-      var clazz = item.clazz ? String(item.clazz) : ""
-      var initClass = item.initialClass ? String(item.initialClass) : ""
-      var ipcClass = (item.lastIpcObject && item.lastIpcObject.class) ? String(item.lastIpcObject.class) : ""
-      var ipcInit = (item.lastIpcObject && item.lastIpcObject.initialClass) ? String(item.lastIpcObject.initialClass) : ""
-      if (appId === "omastream" || clazz === "omastream" || initClass === "omastream" || ipcClass === "omastream" || ipcInit === "omastream") {
-        return true
+    // 1. Direct state.json check written by app backend
+    if (state && state.appRunning === true) {
+      return true
+    }
+    // 2. Safe compositor check with try-catch and existence guards
+    try {
+      if (typeof Hyprland !== "undefined" && Hyprland && Hyprland.toplevels && Hyprland.toplevels.values) {
+        var list = Hyprland.toplevels.values
+        for (var i = 0; i < list.length; i++) {
+          var item = list[i]
+          if (!item) continue
+          var appId = (item.wayland && item.wayland.appId) ? String(item.wayland.appId) : ""
+          var clazz = item.clazz ? String(item.clazz) : ""
+          var initClass = item.initialClass ? String(item.initialClass) : ""
+          var ipcClass = (item.lastIpcObject && item.lastIpcObject.class) ? String(item.lastIpcObject.class) : ""
+          var ipcInit = (item.lastIpcObject && item.lastIpcObject.initialClass) ? String(item.lastIpcObject.initialClass) : ""
+          if (appId === "omastream" || clazz === "omastream" || initClass === "omastream" || ipcClass === "omastream" || ipcInit === "omastream") {
+            return true
+          }
+        }
       }
+    } catch (e) {
+      // Hyprland not available or running under different Wayland compositor
     }
     return false
   }

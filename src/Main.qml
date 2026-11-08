@@ -7,11 +7,11 @@ ApplicationWindow {
     id: win
 
     width: 380
-    height: 560
+    height: 590
     minimumWidth: 380
     maximumWidth: 420
-    minimumHeight: 540
-    maximumHeight: 640
+    minimumHeight: 560
+    maximumHeight: 680
     flags: Qt.Dialog | Qt.WindowCloseButtonHint
     visible: true
     title: "omastream"
@@ -21,8 +21,13 @@ ApplicationWindow {
     Material.accent: "#5e81f4"
 
     property bool settingsOpen: false
-    property bool keyVisible: false
-    property string pendingKey: backend.streamKey
+    property string pendingYtKey: backend.youtubeKey
+    property string pendingTwitchKey: backend.twitchKey
+    property string pendingKickKey: backend.kickKey
+    property string pendingKickUrl: backend.kickUrl
+    property bool ytKeyVisible: false
+    property bool twitchKeyVisible: false
+    property bool kickKeyVisible: false
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: backend.toggleStream() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: backend.toggleCam() }
@@ -114,18 +119,18 @@ ApplicationWindow {
                 }
 
                 Text {
-                    text: backend.streaming ? (qsTr("Broadcasting to YouTube · ") + backend.elapsed) : qsTr("Screen streaming that looks great")
+                    text: backend.streaming ? (qsTr("Broadcasting to ") + backend.activePlatforms + " · " + backend.elapsed) : (qsTr("Broadcasting: ") + backend.activePlatforms)
                     color: backend.streaming ? "#ff6b6b" : "#7e8299"
                     font.pixelSize: 11
                 }
             }
 
-            // YouTube Studio button
+            // Creator Dashboard button
             Rectangle {
                 width: 32
                 height: 32
                 radius: 8
-                color: ytMouse.containsMouse ? "#282c42" : "#1a1d2b"
+                color: studioBtnMouse.containsMouse ? "#282c42" : "#1a1d2b"
                 border.width: 1
                 border.color: "#25283c"
 
@@ -136,19 +141,26 @@ ApplicationWindow {
                     source: "qrc:/icons/monitor.svg"
                     sourceSize: Qt.size(24, 24)
                     fillMode: Image.PreserveAspectFit
-                    opacity: ytMouse.containsMouse ? 1.0 : 0.75
+                    opacity: studioBtnMouse.containsMouse ? 1.0 : 0.75
                 }
 
                 MouseArea {
-                    id: ytMouse
+                    id: studioBtnMouse
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: backend.openYouTubeStudio()
+                    onClicked: {
+                        if (backend.kickEnabled && backend.kickKey !== "" && !backend.youtubeEnabled && !backend.twitchEnabled)
+                            backend.openKickDashboard()
+                        else if (backend.twitchEnabled && backend.twitchKey !== "" && !backend.youtubeEnabled)
+                            backend.openTwitchDashboard()
+                        else
+                            backend.openYouTubeStudio()
+                    }
                 }
 
-                ToolTip.visible: ytMouse.containsMouse
-                ToolTip.text: qsTr("Open YouTube Studio")
+                ToolTip.visible: studioBtnMouse.containsMouse
+                ToolTip.text: qsTr("Open Creator Dashboard")
             }
 
             // Settings gear button
@@ -176,13 +188,151 @@ ApplicationWindow {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        win.pendingKey = backend.streamKey
+                        win.pendingYtKey = backend.youtubeKey
+                        win.pendingTwitchKey = backend.twitchKey
+                        win.pendingKickKey = backend.kickKey
+                        win.pendingKickUrl = backend.kickUrl
                         win.settingsOpen = !win.settingsOpen
                     }
                 }
 
                 ToolTip.visible: gearMouse.containsMouse
                 ToolTip.text: qsTr("Settings")
+            }
+        }
+
+        // ── Multi-Platform Quick Selector Bar ─────────────────────────────────
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            // YouTube Pill
+            Rectangle {
+                Layout.fillWidth: true
+                height: 28
+                radius: 6
+                color: backend.youtubeEnabled ? (ytChipMouse.containsMouse ? "#2f1b1d" : "#241618") : (ytChipMouse.containsMouse ? "#222536" : "#1a1d2b")
+                border.width: 1
+                border.color: backend.youtubeEnabled ? (backend.youtubeKey !== "" ? "#e53935" : "#b31217") : "#25283c"
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 5
+
+                    Rectangle {
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: backend.youtubeEnabled ? (backend.youtubeKey !== "" ? "#4ade80" : "#facc15") : "#5e6378"
+                    }
+
+                    Text {
+                        text: "YouTube"
+                        color: backend.youtubeEnabled ? "#ffffff" : "#7e8299"
+                        font.family: "JetBrains Mono, monospace"
+                        font.pixelSize: 11
+                        font.bold: backend.youtubeEnabled
+                    }
+                }
+
+                MouseArea {
+                    id: ytChipMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: backend.togglePlatform("youtube")
+                }
+
+                ToolTip.visible: ytChipMouse.containsMouse
+                ToolTip.text: backend.youtubeEnabled
+                    ? (backend.youtubeKey !== "" ? qsTr("YouTube Live: Active") : qsTr("YouTube Live: Key needed (click settings)"))
+                    : qsTr("YouTube Live: Disabled (click to enable)")
+            }
+
+            // Twitch Pill
+            Rectangle {
+                Layout.fillWidth: true
+                height: 28
+                radius: 6
+                color: backend.twitchEnabled ? (twitchChipMouse.containsMouse ? "#241935" : "#1b1428") : (twitchChipMouse.containsMouse ? "#222536" : "#1a1d2b")
+                border.width: 1
+                border.color: backend.twitchEnabled ? (backend.twitchKey !== "" ? "#9146ff" : "#6441a5") : "#25283c"
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 5
+
+                    Rectangle {
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: backend.twitchEnabled ? (backend.twitchKey !== "" ? "#4ade80" : "#facc15") : "#5e6378"
+                    }
+
+                    Text {
+                        text: "Twitch"
+                        color: backend.twitchEnabled ? "#ffffff" : "#7e8299"
+                        font.family: "JetBrains Mono, monospace"
+                        font.pixelSize: 11
+                        font.bold: backend.twitchEnabled
+                    }
+                }
+
+                MouseArea {
+                    id: twitchChipMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: backend.togglePlatform("twitch")
+                }
+
+                ToolTip.visible: twitchChipMouse.containsMouse
+                ToolTip.text: backend.twitchEnabled
+                    ? (backend.twitchKey !== "" ? qsTr("Twitch: Active") : qsTr("Twitch: Key needed (click settings)"))
+                    : qsTr("Twitch: Disabled (click to enable)")
+            }
+
+            // Kick Pill
+            Rectangle {
+                Layout.fillWidth: true
+                height: 28
+                radius: 6
+                color: backend.kickEnabled ? (kickChipMouse.containsMouse ? "#152a1b" : "#101e14") : (kickChipMouse.containsMouse ? "#222536" : "#1a1d2b")
+                border.width: 1
+                border.color: backend.kickEnabled ? (backend.kickKey !== "" ? "#53fc18" : "#2e8b10") : "#25283c"
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 5
+
+                    Rectangle {
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: backend.kickEnabled ? (backend.kickKey !== "" ? "#4ade80" : "#facc15") : "#5e6378"
+                    }
+
+                    Text {
+                        text: "Kick"
+                        color: backend.kickEnabled ? "#ffffff" : "#7e8299"
+                        font.family: "JetBrains Mono, monospace"
+                        font.pixelSize: 11
+                        font.bold: backend.kickEnabled
+                    }
+                }
+
+                MouseArea {
+                    id: kickChipMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: backend.togglePlatform("kick")
+                }
+
+                ToolTip.visible: kickChipMouse.containsMouse
+                ToolTip.text: backend.kickEnabled
+                    ? (backend.kickKey !== "" ? qsTr("Kick: Active") : qsTr("Kick: Key needed (click settings)"))
+                    : qsTr("Kick: Disabled (click to enable)")
             }
         }
 
@@ -243,7 +393,17 @@ ApplicationWindow {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: backend.toggleStream()
+                    onClicked: {
+                        if (!backend.streaming && !backend.hasAnyPlatformConfigured) {
+                            win.pendingYtKey = backend.youtubeKey
+                            win.pendingTwitchKey = backend.twitchKey
+                            win.pendingKickKey = backend.kickKey
+                            win.pendingKickUrl = backend.kickUrl
+                            win.settingsOpen = true
+                        } else {
+                            backend.toggleStream()
+                        }
+                    }
                 }
             }
 
@@ -268,14 +428,14 @@ ApplicationWindow {
                         return backend.lastError
                     if (backend.streaming)
                         return qsTr("LIVE · ") + backend.elapsed
-                    if (!backend.hasStreamKey)
-                        return qsTr("Add stream key in Settings (⚙) to stream")
+                    if (!backend.hasAnyPlatformConfigured)
+                        return qsTr("Add stream keys in Settings (⚙) to stream")
                     const resLabel = (backend.streamResolution && backend.streamResolution !== "auto") ? (" · " + backend.streamResolution) : ""
                     return backend.camVisible
-                        ? (qsTr("Ready") + resLabel + qsTr(" · Camera overlay live on screen"))
-                        : (qsTr("Ready") + resLabel + qsTr(" · Press Space to stream"))
+                        ? (qsTr("Ready · ") + backend.activePlatforms + resLabel + qsTr(" · Camera on"))
+                        : (qsTr("Ready · ") + backend.activePlatforms + resLabel + qsTr(" · Press Space"))
                 }
-                color: backend.lastError !== "" ? "#ff6b6b" : (backend.streaming ? "#e53935" : (!backend.hasStreamKey ? "#e0af68" : "#7e8299"))
+                color: backend.lastError !== "" ? "#ff6b6b" : (backend.streaming ? "#e53935" : (!backend.hasAnyPlatformConfigured ? "#e0af68" : "#7e8299"))
                 font.pixelSize: 11
             }
 
@@ -747,103 +907,458 @@ ApplicationWindow {
                     width: settingsOverlay.width - 36
                     spacing: 10
 
-                    // Stream key field
-                    Text {
-                        text: qsTr("YouTube Stream Key")
-                        color: "#a0a4b8"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-
+                    // ── Platform 1: YouTube Live ──
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 42
+                        implicitHeight: ytCardCol.implicitHeight + 16
                         radius: 8
-                        color: "#1a1d2b"
+                        color: "#181a27"
                         border.width: 1
-                        border.color: keyField.activeFocus ? "#e53935" : "#25283c"
+                        border.color: backend.youtubeEnabled ? "#4a2022" : "#232638"
 
-                        RowLayout {
+                        ColumnLayout {
+                            id: ytCardCol
                             anchors {
                                 fill: parent
-                                leftMargin: 10
-                                rightMargin: 8
+                                margins: 10
                             }
-                            spacing: 6
+                            spacing: 8
 
-                            TextField {
-                                id: keyField
+                            RowLayout {
                                 Layout.fillWidth: true
-                                echoMode: win.keyVisible ? TextField.Normal : TextField.Password
-                                text: win.pendingKey
-                                placeholderText: qsTr("Paste stream key…")
-                                color: "#f0f1f5"
-                                font.pixelSize: 12
-                                background: null
-                                onTextEdited: win.pendingKey = text
-                                onEditingFinished: {
-                                    if (text !== backend.streamKey)
-                                        backend.setSetting("STREAM_KEY", text)
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: backend.youtubeEnabled ? (backend.youtubeKey !== "" ? "#e53935" : "#e0af68") : "#5e6378"
+                                }
+
+                                Text {
+                                    text: qsTr("YouTube Live")
+                                    color: "#f0f1f5"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    width: ytStudioText.implicitWidth + 12
+                                    height: 22
+                                    radius: 4
+                                    color: ytStudioMouse.containsMouse ? "#384166" : "#202334"
+                                    border.width: 1
+                                    border.color: "#2c3046"
+
+                                    Text {
+                                        id: ytStudioText
+                                        anchors.centerIn: parent
+                                        text: qsTr("Studio ↗")
+                                        color: "#8e93aa"
+                                        font.pixelSize: 10
+                                    }
+
+                                    MouseArea {
+                                        id: ytStudioMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.openYouTubeStudio()
+                                    }
+                                }
+
+                                Switch {
+                                    checked: backend.youtubeEnabled
+                                    onToggled: backend.togglePlatform("youtube")
                                 }
                             }
 
                             Rectangle {
-                                width: 28
-                                height: 28
+                                Layout.fillWidth: true
+                                height: 38
                                 radius: 6
-                                color: eyeMouse.containsMouse ? "#282c42" : "transparent"
+                                color: "#13141f"
+                                border.width: 1
+                                border.color: ytKeyField.activeFocus ? "#e53935" : "#25283c"
 
-                                Image {
-                                    anchors.centerIn: parent
-                                    width: 16
-                                    height: 16
-                                    source: "qrc:/icons/eye.svg"
-                                    sourceSize: Qt.size(24, 24)
-                                    fillMode: Image.PreserveAspectFit
-                                    opacity: win.keyVisible ? 1.0 : 0.5
-                                }
-
-                                MouseArea {
-                                    id: eyeMouse
+                                RowLayout {
                                     anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: win.keyVisible = !win.keyVisible
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    TextField {
+                                        id: ytKeyField
+                                        Layout.fillWidth: true
+                                        echoMode: win.ytKeyVisible ? TextField.Normal : TextField.Password
+                                        text: win.pendingYtKey
+                                        placeholderText: qsTr("Paste YouTube stream key…")
+                                        color: "#f0f1f5"
+                                        font.pixelSize: 11
+                                        background: null
+                                        onTextEdited: win.pendingYtKey = text
+                                        onEditingFinished: {
+                                            if (text !== backend.youtubeKey) {
+                                                backend.setSetting("YOUTUBE_KEY", text)
+                                                backend.setSetting("STREAM_KEY", text)
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 24
+                                        height: 24
+                                        radius: 4
+                                        color: ytEyeMouse.containsMouse ? "#282c42" : "transparent"
+
+                                        Image {
+                                            anchors.centerIn: parent
+                                            width: 14
+                                            height: 14
+                                            source: "qrc:/icons/eye.svg"
+                                            sourceSize: Qt.size(24, 24)
+                                            fillMode: Image.PreserveAspectFit
+                                            opacity: win.ytKeyVisible ? 1.0 : 0.5
+                                        }
+
+                                        MouseArea {
+                                            id: ytEyeMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.ytKeyVisible = !win.ytKeyVisible
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: ytSaveText.implicitWidth + 14
+                                        height: 26
+                                        radius: 4
+                                        color: ytSaveMouse.containsMouse ? "#c72828" : "#b31217"
+
+                                        Text {
+                                            id: ytSaveText
+                                            anchors.centerIn: parent
+                                            text: qsTr("Save")
+                                            color: "#ffffff"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            id: ytSaveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                backend.setSetting("YOUTUBE_KEY", ytKeyField.text)
+                                                backend.setSetting("STREAM_KEY", ytKeyField.text)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Save Key button
+                    // ── Platform 2: Twitch ──
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 32
-                        radius: 6
-                        color: saveKeyMouse.containsMouse ? "#c72828" : "#b31217"
+                        implicitHeight: twitchCardCol.implicitHeight + 16
+                        radius: 8
+                        color: "#181a27"
+                        border.width: 1
+                        border.color: backend.twitchEnabled ? "#35224e" : "#232638"
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: qsTr("Save stream key")
-                            color: "#ffffff"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
+                        ColumnLayout {
+                            id: twitchCardCol
+                            anchors {
+                                fill: parent
+                                margins: 10
+                            }
+                            spacing: 8
 
-                        MouseArea {
-                            id: saveKeyMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                backend.setSetting("STREAM_KEY", keyField.text)
-                                saveAnim.start()
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: backend.twitchEnabled ? (backend.twitchKey !== "" ? "#9146ff" : "#e0af68") : "#5e6378"
+                                }
+
+                                Text {
+                                    text: qsTr("Twitch")
+                                    color: "#f0f1f5"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    width: twitchDashText.implicitWidth + 12
+                                    height: 22
+                                    radius: 4
+                                    color: twitchDashMouse.containsMouse ? "#384166" : "#202334"
+                                    border.width: 1
+                                    border.color: "#2c3046"
+
+                                    Text {
+                                        id: twitchDashText
+                                        anchors.centerIn: parent
+                                        text: qsTr("Dashboard ↗")
+                                        color: "#8e93aa"
+                                        font.pixelSize: 10
+                                    }
+
+                                    MouseArea {
+                                        id: twitchDashMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.openTwitchDashboard()
+                                    }
+                                }
+
+                                Switch {
+                                    checked: backend.twitchEnabled
+                                    onToggled: backend.togglePlatform("twitch")
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 38
+                                radius: 6
+                                color: "#13141f"
+                                border.width: 1
+                                border.color: twitchKeyField.activeFocus ? "#9146ff" : "#25283c"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    TextField {
+                                        id: twitchKeyField
+                                        Layout.fillWidth: true
+                                        echoMode: win.twitchKeyVisible ? TextField.Normal : TextField.Password
+                                        text: win.pendingTwitchKey
+                                        placeholderText: qsTr("Paste Twitch stream key (live_…)…")
+                                        color: "#f0f1f5"
+                                        font.pixelSize: 11
+                                        background: null
+                                        onTextEdited: win.pendingTwitchKey = text
+                                        onEditingFinished: {
+                                            if (text !== backend.twitchKey)
+                                                backend.setSetting("TWITCH_KEY", text)
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 24
+                                        height: 24
+                                        radius: 4
+                                        color: twitchEyeMouse.containsMouse ? "#282c42" : "transparent"
+
+                                        Image {
+                                            anchors.centerIn: parent
+                                            width: 14
+                                            height: 14
+                                            source: "qrc:/icons/eye.svg"
+                                            sourceSize: Qt.size(24, 24)
+                                            fillMode: Image.PreserveAspectFit
+                                            opacity: win.twitchKeyVisible ? 1.0 : 0.5
+                                        }
+
+                                        MouseArea {
+                                            id: twitchEyeMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.twitchKeyVisible = !win.twitchKeyVisible
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: twitchSaveText.implicitWidth + 14
+                                        height: 26
+                                        radius: 4
+                                        color: twitchSaveMouse.containsMouse ? "#772ce8" : "#9146ff"
+
+                                        Text {
+                                            id: twitchSaveText
+                                            anchors.centerIn: parent
+                                            text: qsTr("Save")
+                                            color: "#ffffff"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            id: twitchSaveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: backend.setSetting("TWITCH_KEY", twitchKeyField.text)
+                                        }
+                                    }
+                                }
                             }
                         }
+                    }
 
-                        SequentialAnimation on opacity {
-                            id: saveAnim
-                            running: false
-                            NumberAnimation { from: 0.5; to: 1.0; duration: 250 }
+                    // ── Platform 3: Kick ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: kickCardCol.implicitHeight + 16
+                        radius: 8
+                        color: "#181a27"
+                        border.width: 1
+                        border.color: backend.kickEnabled ? "#1d3822" : "#232638"
+
+                        ColumnLayout {
+                            id: kickCardCol
+                            anchors {
+                                fill: parent
+                                margins: 10
+                            }
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: backend.kickEnabled ? (backend.kickKey !== "" ? "#53fc18" : "#e0af68") : "#5e6378"
+                                }
+
+                                Text {
+                                    text: qsTr("Kick")
+                                    color: "#f0f1f5"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    width: kickDashText.implicitWidth + 12
+                                    height: 22
+                                    radius: 4
+                                    color: kickDashMouse.containsMouse ? "#384166" : "#202334"
+                                    border.width: 1
+                                    border.color: "#2c3046"
+
+                                    Text {
+                                        id: kickDashText
+                                        anchors.centerIn: parent
+                                        text: qsTr("Dashboard ↗")
+                                        color: "#8e93aa"
+                                        font.pixelSize: 10
+                                    }
+
+                                    MouseArea {
+                                        id: kickDashMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.openKickDashboard()
+                                    }
+                                }
+
+                                Switch {
+                                    checked: backend.kickEnabled
+                                    onToggled: backend.togglePlatform("kick")
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 38
+                                radius: 6
+                                color: "#13141f"
+                                border.width: 1
+                                border.color: kickKeyField.activeFocus ? "#53fc18" : "#25283c"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    TextField {
+                                        id: kickKeyField
+                                        Layout.fillWidth: true
+                                        echoMode: win.kickKeyVisible ? TextField.Normal : TextField.Password
+                                        text: win.pendingKickKey
+                                        placeholderText: qsTr("Paste Kick stream key (sk_…)…")
+                                        color: "#f0f1f5"
+                                        font.pixelSize: 11
+                                        background: null
+                                        onTextEdited: win.pendingKickKey = text
+                                        onEditingFinished: {
+                                            if (text !== backend.kickKey)
+                                                backend.setSetting("KICK_KEY", text)
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 24
+                                        height: 24
+                                        radius: 4
+                                        color: kickEyeMouse.containsMouse ? "#282c42" : "transparent"
+
+                                        Image {
+                                            anchors.centerIn: parent
+                                            width: 14
+                                            height: 14
+                                            source: "qrc:/icons/eye.svg"
+                                            sourceSize: Qt.size(24, 24)
+                                            fillMode: Image.PreserveAspectFit
+                                            opacity: win.kickKeyVisible ? 1.0 : 0.5
+                                        }
+
+                                        MouseArea {
+                                            id: kickEyeMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.kickKeyVisible = !win.kickKeyVisible
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: kickSaveText.implicitWidth + 14
+                                        height: 26
+                                        radius: 4
+                                        color: kickSaveMouse.containsMouse ? "#3eb813" : "#2d8b0e"
+
+                                        Text {
+                                            id: kickSaveText
+                                            anchors.centerIn: parent
+                                            text: qsTr("Save")
+                                            color: "#ffffff"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            id: kickSaveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: backend.setSetting("KICK_KEY", kickKeyField.text)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1109,8 +1624,12 @@ ApplicationWindow {
             outputSelect.currentIndex = outputIndexFor(backend.audioSystem, backend.systemOutputs)
             micSelect.currentIndex = outputIndexFor(backend.audioMic, backend.microphones)
             resSelect.currentIndex = resIndexFor(backend.streamResolution)
-            if (!keyField.activeFocus && backend.streamKey !== "")
-                win.pendingKey = backend.streamKey
+            if (!ytKeyField.activeFocus)
+                win.pendingYtKey = backend.youtubeKey
+            if (!twitchKeyField.activeFocus)
+                win.pendingTwitchKey = backend.twitchKey
+            if (!kickKeyField.activeFocus)
+                win.pendingKickKey = backend.kickKey
         }
         function onAudioDevicesChanged() {
             outputSelect.currentIndex = outputIndexFor(backend.audioSystem, backend.systemOutputs)

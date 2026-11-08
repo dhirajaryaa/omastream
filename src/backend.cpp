@@ -80,6 +80,7 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     // Show camera preview overlay on launch so the streamer can preview framing & position
     runCommand({"cam", "on"}, {});
     m_camVisible = true;
+    setAppRunningState(true);
     emit stateChanged();
 }
 
@@ -91,10 +92,33 @@ void Backend::cleanupOnClose() {
     if (m_cleanedUp)
         return;
     m_cleanedUp = true;
+    setAppRunningState(false);
     if (m_streaming) {
         QProcess::execute(m_cli, QStringList{"stop"});
     }
     QProcess::execute(m_cli, QStringList{"cam", "off"});
+}
+
+void Backend::setAppRunningState(bool running) {
+    QFile file(m_statePath);
+    QJsonObject obj;
+    if (file.open(QIODevice::ReadOnly)) {
+        obj = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+    }
+    obj["appRunning"] = running;
+    obj["appPid"] = running ? static_cast<qint64>(QCoreApplication::applicationPid()) : 0;
+
+    QDir().mkpath(QFileInfo(m_statePath).absolutePath());
+    const QString tmpPath = m_statePath + QStringLiteral(".tmp.%1").arg(QCoreApplication::applicationPid());
+    QFile tmpFile(tmpPath);
+    if (tmpFile.open(QIODevice::WriteOnly)) {
+        tmpFile.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+        tmpFile.flush();
+        tmpFile.close();
+        QFile::remove(m_statePath);
+        QFile::rename(tmpPath, m_statePath);
+    }
 }
 
 void Backend::stopAndQuit() {
@@ -271,12 +295,25 @@ void Backend::reloadConfig() {
     }
 }
 
+QString Backend::activePlatforms() const {
+    QStringList list;
+    if (youtubeEnabled() && !youtubeKey().isEmpty())
+        list << QStringLiteral("YouTube");
+    if (twitchEnabled() && !twitchKey().isEmpty())
+        list << QStringLiteral("Twitch");
+    if (kickEnabled() && !kickKey().isEmpty())
+        list << QStringLiteral("Kick");
+    if (list.isEmpty())
+        return tr("No platform selected");
+    return list.join(QStringLiteral(" + "));
+}
+
 QString Backend::statusLine() const {
     if (!m_streaming)
         return tr("Not streaming");
     if (m_mode == "file")
         return tr("Recording test · %1").arg(m_elapsed);
-    return tr("LIVE · %1").arg(m_elapsed);
+    return tr("LIVE (%1) · %2").arg(activePlatforms(), m_elapsed);
 }
 
 void Backend::runCommand(const QStringList &args, const QString &niceError) {
@@ -332,7 +369,7 @@ void Backend::startStream() {
     emit lastErrorChanged();
     m_starting = true;
     emit busyChanged();
-    runCommand({"start"}, tr("Check YouTube is ready and the stream key is set."));
+    runCommand({"start"}, tr("Check streaming platforms are configured and stream keys are set."));
 }
 
 void Backend::stopStream() {
@@ -433,10 +470,30 @@ void Backend::openYouTubeStudio() {
     QDesktopServices::openUrl(QUrl(QStringLiteral("https://studio.youtube.com")));
 }
 
+void Backend::openTwitchDashboard() {
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://dashboard.twitch.tv")));
+}
+
+void Backend::openKickDashboard() {
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://kick.com/dashboard/stream")));
+}
+
+void Backend::togglePlatform(const QString &platform) {
+    const QString p = platform.toLower();
+    if (p == "youtube") {
+        setSetting("YOUTUBE_ENABLED", youtubeEnabled() ? "false" : "true");
+    } else if (p == "twitch") {
+        setSetting("TWITCH_ENABLED", twitchEnabled() ? "false" : "true");
+    } else if (p == "kick") {
+        setSetting("KICK_ENABLED", kickEnabled() ? "false" : "true");
+    }
+}
+
 void Backend::setSetting(const QString &key, const QVariant &value) {
     static const QStringList allowed{
-        "STREAM_KEY", "STREAM_RESOLUTION", "VIDEO_CODEC", "VIDEO_BITRATE", "FPS", "AUDIO_SYSTEM", "AUDIO_MIC",
-        "MIC_ENABLED", "CAM_DEVICE", "CAM_FLIP", "CAM_RECORD", "CAM_ON_START",
+        "STREAM_KEY", "YOUTUBE_KEY", "YOUTUBE_ENABLED", "TWITCH_KEY", "TWITCH_ENABLED", "KICK_KEY", "KICK_URL", "KICK_ENABLED",
+        "STREAM_RESOLUTION", "VIDEO_CODEC", "VIDEO_BITRATE", "FPS", "AUDIO_SYSTEM", "AUDIO_MIC",
+        "MIC_ENABLED", "SCREEN_SHARPNESS", "CAM_DEVICE", "CAM_FLIP", "CAM_RECORD", "CAM_ON_START",
         "DEFAULT_CAM_SHAPE", "CAM_FIT", "CPU_FALLBACK"};
     if (!allowed.contains(key) || value.isNull())
         return;

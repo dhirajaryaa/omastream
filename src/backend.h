@@ -22,6 +22,15 @@ class Backend : public QObject {
     Q_PROPERTY(bool starting READ starting NOTIFY busyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(bool hasStreamKey READ hasStreamKey NOTIFY configChanged)
+    Q_PROPERTY(bool hasAnyPlatformConfigured READ hasAnyPlatformConfigured NOTIFY configChanged)
+    Q_PROPERTY(QString activePlatforms READ activePlatforms NOTIFY stateChanged)
+    Q_PROPERTY(bool youtubeEnabled READ youtubeEnabled NOTIFY configChanged)
+    Q_PROPERTY(QString youtubeKey READ youtubeKey NOTIFY configChanged)
+    Q_PROPERTY(bool twitchEnabled READ twitchEnabled NOTIFY configChanged)
+    Q_PROPERTY(QString twitchKey READ twitchKey NOTIFY configChanged)
+    Q_PROPERTY(bool kickEnabled READ kickEnabled NOTIFY configChanged)
+    Q_PROPERTY(QString kickKey READ kickKey NOTIFY configChanged)
+    Q_PROPERTY(QString kickUrl READ kickUrl NOTIFY configChanged)
     Q_PROPERTY(QString streamKey READ streamKey NOTIFY configChanged)
     Q_PROPERTY(QString streamResolution READ streamResolution NOTIFY configChanged)
     Q_PROPERTY(QString audioSystem READ audioSystem NOTIFY configChanged)
@@ -48,7 +57,35 @@ public:
     QString camShape() const { return m_camShape; }
     bool camFlip() const { return m_camFlip; }
     bool starting() const { return m_starting; }
-    bool hasStreamKey() const { return !streamKey().trimmed().isEmpty(); }
+    bool hasStreamKey() const { return hasAnyPlatformConfigured(); }
+    bool hasAnyPlatformConfigured() const {
+        return (youtubeEnabled() && !youtubeKey().isEmpty()) ||
+               (twitchEnabled() && !twitchKey().isEmpty()) ||
+               (kickEnabled() && !kickKey().isEmpty());
+    }
+    QString activePlatforms() const;
+    QString youtubeKey() const {
+        const QString k = m_config.value("YOUTUBE_KEY").toString().trimmed();
+        return !k.isEmpty() ? k : m_config.value("STREAM_KEY").toString().trimmed();
+    }
+    bool youtubeEnabled() const {
+        return m_config.value("YOUTUBE_ENABLED", "true").toString() != "false";
+    }
+    QString twitchKey() const {
+        return m_config.value("TWITCH_KEY").toString().trimmed();
+    }
+    bool twitchEnabled() const {
+        return m_config.value("TWITCH_ENABLED", "false").toString() == "true";
+    }
+    QString kickKey() const {
+        return m_config.value("KICK_KEY").toString().trimmed();
+    }
+    QString kickUrl() const {
+        return m_config.value("KICK_URL", "rtmps://fa723fc1b171.global-contribute.live-video.net/app").toString().trimmed();
+    }
+    bool kickEnabled() const {
+        return m_config.value("KICK_ENABLED", "false").toString() == "true";
+    }
     // What the user reads when something goes wrong: a command's own stderr
     // leads; the recorder's watchdog reason (written to state.json by the CLI)
     // follows. One honest line, no stack dumps.
@@ -56,7 +93,7 @@ public:
         return m_commandError.isEmpty() ? m_stateError : m_commandError;
     }
 
-    QString streamKey() const { return m_config.value("STREAM_KEY").toString(); }
+    QString streamKey() const { return youtubeKey(); }
     QString streamResolution() const { return m_config.value("STREAM_RESOLUTION", "auto").toString(); }
     QString audioSystem() const { return m_config.value("AUDIO_SYSTEM", "auto").toString(); }
     QString audioMic() const { return m_config.value("AUDIO_MIC", "auto").toString(); }
@@ -80,6 +117,9 @@ public:
     Q_INVOKABLE void setCamCorner(const QString &corner);
     Q_INVOKABLE void setCamFlip(bool flip);
     Q_INVOKABLE void openYouTubeStudio();
+    Q_INVOKABLE void openTwitchDashboard();
+    Q_INVOKABLE void openKickDashboard();
+    Q_INVOKABLE void togglePlatform(const QString &platform);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void refreshAudioDevices();
     Q_INVOKABLE void cleanupOnClose();
@@ -98,6 +138,7 @@ signals:
     void lastErrorChanged();
 
 private:
+    void setAppRunningState(bool running);
     QString basePath(const char *xdgName, const char *fallback);
     void armWatch(const QString &path);
     void reloadState();
