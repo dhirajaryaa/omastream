@@ -478,7 +478,7 @@ cmd_stop() {
     die "nothing to stop"
   fi
 
-  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null}"
+  state_merge "{\"streaming\":false,\"pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null,\"cam\":{\"visible\":false}}"
   rm -rf "$SOCK_DIR" 2>/dev/null || true
   log "stopped"
   echo "stopped"
@@ -502,7 +502,7 @@ cmd_status() {
 
   if ! gsr_pid_alive "$pid"; then
     if [[ $streaming == true ]]; then
-      state_merge '{"streaming":false,"pid":0}' 2>/dev/null
+      state_merge '{"streaming":false,"pid":0,"cam":{"visible":false}}' 2>/dev/null
       streaming=false
     fi
   fi
@@ -610,6 +610,11 @@ cmd_cam() { # cmd_cam <sub> [args…]
       [[ -n $r && $r =~ ^[0-9.]+$ ]] || die "cam radius needs a numeric value: 0..1 (ratio) or 0..100"
       state_merge "{\"cam\":{\"radius\":$r}}"
       echo "camera radius: $r" ;;
+    sharpness)
+      local s="${1:-}"
+      [[ -n $s && $s =~ ^[0-9.]+$ ]] || die "cam sharpness needs a numeric value: 0..1 (ratio) or 0..100"
+      state_merge "{\"cam\":{\"sharpness\":$s}}"
+      echo "camera sharpness: $s" ;;
     corner)
       local c="${1:-bottom-right}"
       shape="$(camera_shape)"
@@ -642,6 +647,7 @@ cmd_cam() { # cmd_cam <sub> [args…]
       screen="$(jq -re '.screen // "screen"' <<<"$payload" 2>/dev/null)"
       shape=$(jq -re '.shape // ""' <<<"$payload" 2>/dev/null)
       radius=$(jq -re '.radius // empty' <<<"$payload" 2>/dev/null)
+      sharpness=$(jq -re '.sharpness // empty' <<<"$payload" 2>/dev/null)
       shape="$(norm_shape "$shape")"
       [[ -n $shape ]] || shape="$(camera_shape)"
       [[ $x =~ ^-?[0-9.]+$ && $y =~ ^-?[0-9.]+$ && $size =~ ^[0-9.]+$ ]] || die "cam save: x, y and size must be numbers"
@@ -654,9 +660,12 @@ cmd_cam() { # cmd_cam <sub> [args…]
       capX="$(awk -v s="$size" 'BEGIN { printf "%.6f", 1 - s }')"
       capY="$(awk -v s="$contentH" 'BEGIN { printf "%.6f", 1 - s }')"
       x="$(clamp_frac "$x" "$capX")"; y="$(clamp_frac "$y" "$capY")"
-      local radJson=""
+      local extraJson=""
       if [[ -n $radius && $radius =~ ^[0-9.]+$ ]]; then
-        radJson=",\"radius\":$radius"
+        extraJson="$extraJson,\"radius\":$radius"
+      fi
+      if [[ -n $sharpness && $sharpness =~ ^[0-9.]+$ ]]; then
+        extraJson="$extraJson,\"sharpness\":$sharpness"
       fi
       if [[ $screen == "screen" || $screen == "all" ]]; then
         local patch
@@ -667,18 +676,18 @@ cmd_cam() { # cmd_cam <sub> [args…]
           | add // {}
           | .[($shape + "@screen")] = {x: $x, y: $y, size: $size}
         ' 2>/dev/null)
-        state_merge "{\"cam\":{\"geometry\":$patch$radJson}}"
+        state_merge "{\"cam\":{\"geometry\":$patch$extraJson}}"
         printf '{"%s@screen":{"x":%s,"y":%s,"size":%s}}\n' "$shape" "$x" "$y" "$size"
       else
         key="$(geom_key "$shape" "$screen")"
-        state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}$radJson}}"
+        state_merge "{\"cam\":{\"geometry\":{\"$key\":{\"x\":$x,\"y\":$y,\"size\":$size}}$extraJson}}"
         printf '{"%s":{"x":%s,"y":%s,"size":%s}}\n' "$key" "$x" "$y" "$size"
       fi
       ;;
     status)
-      state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, radius: .cam.radius, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
+      state_json | jq -c '{visible: .cam.visible, shape: .cam.shape, radius: .cam.radius, sharpness: .cam.sharpness, device: .cam.device, flip: .cam.flip, geometry: .cam.geometry}' ;;
     *)
-      die "unknown camera command: '$sub' — on|off|toggle|shape|cycle-shape|save|device|flip|status" ;;
+      die "unknown camera command: '$sub' — on|off|toggle|shape|cycle-shape|radius|sharpness|save|device|flip|status" ;;
   esac
 }
 
@@ -827,6 +836,7 @@ omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → R
   omastream-cli cam cycle-shape
   omastream-cli cam corner <tl|tr|bl|br|top-left|top-right|bottom-left|bottom-right>
   omastream-cli cam radius <0..1|0..100> corner radius ratio or pixels
+  omastream-cli cam sharpness <0..1|0..100> video sharpness / contrast enhancement
   omastream-cli cam flip [true|false]    horizontal mirror toggle
   omastream-cli cam save '<json>'        the shell bubble persists drag/resize here
   omastream-cli cam status

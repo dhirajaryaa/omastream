@@ -2,6 +2,7 @@
 #include "version.h"
 
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -83,10 +84,22 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
 }
 
 Backend::~Backend() {
-    // Only turn off preview camera if not live streaming
-    if (!m_streaming) {
-        runCommand({"cam", "off"}, {});
+    cleanupOnClose();
+}
+
+void Backend::cleanupOnClose() {
+    if (m_cleanedUp)
+        return;
+    m_cleanedUp = true;
+    if (m_streaming) {
+        QProcess::execute(m_cli, QStringList{"stop"});
     }
+    QProcess::execute(m_cli, QStringList{"cam", "off"});
+}
+
+void Backend::stopAndQuit() {
+    cleanupOnClose();
+    QGuiApplication::quit();
 }
 
 QString Backend::basePath(const char *xdgName, const char *fallback) {

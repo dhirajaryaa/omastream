@@ -33,6 +33,10 @@ int main(int argc, char *argv[]) {
     Theme theme;
     Backend backend;
 
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, [&backend]() {
+        backend.cleanupOnClose();
+    });
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);

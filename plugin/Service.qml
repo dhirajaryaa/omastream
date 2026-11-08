@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import qs.Commons
 
 // omastream service — manages the camera bubble overlay across monitors.
@@ -17,10 +18,29 @@ Item {
   readonly property string statePath: stateHome + "/omastream/state.json"
   readonly property string confPath: Quickshell.env("HOME") + "/.config/omastream/config.env"
 
+  // Detect whether the omastream GUI app window is open
+  readonly property bool appRunning: {
+    if (!Hyprland.toplevels || !Hyprland.toplevels.values) return false
+    var list = Hyprland.toplevels.values
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i]
+      if (!item) continue
+      var appId = (item.wayland && item.wayland.appId) ? String(item.wayland.appId) : ""
+      var clazz = item.clazz ? String(item.clazz) : ""
+      var initClass = item.initialClass ? String(item.initialClass) : ""
+      var ipcClass = (item.lastIpcObject && item.lastIpcObject.class) ? String(item.lastIpcObject.class) : ""
+      var ipcInit = (item.lastIpcObject && item.lastIpcObject.initialClass) ? String(item.lastIpcObject.initialClass) : ""
+      if (appId === "omastream" || clazz === "omastream" || initClass === "omastream" || ipcClass === "omastream" || ipcInit === "omastream") {
+        return true
+      }
+    }
+    return false
+  }
+
   // On clean startup (e.g. PC/OS boot), ensure webcam overlay does NOT start automatically.
   // It only opens when triggered by omastream-app or user action.
   Component.onCompleted: {
-    if (!streamService.streaming) {
+    if (!streamService.streaming && !streamService.appRunning) {
       Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
     }
   }
@@ -32,6 +52,7 @@ Item {
   readonly property bool camVisible: cam ? cam.visible === true : false
   readonly property string camShape: cam ? String(cam.shape || "16:9") : "16:9"
   readonly property real camRadius: cam && typeof cam.radius === "number" ? cam.radius : 0.20
+  readonly property real camSharpness: cam && typeof cam.sharpness === "number" ? cam.sharpness : 0.0
 
   property var camConf: ({})
 
@@ -95,6 +116,10 @@ Item {
     repeat: true
     onTriggered: {
       streamService.reloadState()
+      // If neither streaming nor the app is open, force cam off so it never lingers on the desktop
+      if (streamService.camVisible && !streamService.streaming && !streamService.appRunning) {
+        Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
+      }
     }
   }
 
@@ -108,7 +133,8 @@ Item {
         camVisible: streamService.camVisible,
         streaming: streamService.streaming,
         shape: streamService.camShape,
-        radius: streamService.camRadius
+        radius: streamService.camRadius,
+        sharpness: streamService.camSharpness
       })
     }
     function toggleCam(): string {
@@ -125,6 +151,10 @@ Item {
     }
     function setRadius(radius: string): string {
       Quickshell.execDetached([streamService.omastreamBin, "cam", "radius", radius])
+      return "ok"
+    }
+    function setSharpness(sharpness: string): string {
+      Quickshell.execDetached([streamService.omastreamBin, "cam", "sharpness", sharpness])
       return "ok"
     }
   }

@@ -33,8 +33,12 @@ ApplicationWindow {
         if (backend.streaming) {
             close.accepted = false
             quitDialog.open()
+        } else {
+            backend.cleanupOnClose()
         }
     }
+
+    Component.onDestruction: backend.cleanupOnClose()
 
     // ── main content ──────────────────────────────────────────────────────────
     ColumnLayout {
@@ -1066,10 +1070,9 @@ ApplicationWindow {
             wrapMode: Text.WordWrap
         }
         onAccepted: {
-            backend.stopStream()
-            Qt.quit()
+            backend.stopAndQuit()
         }
-        onRejected: Qt.quit()
+        onRejected: backend.stopAndQuit()
     }
 
     Connections {

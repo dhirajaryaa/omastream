@@ -80,6 +80,8 @@ public:
     Q_INVOKABLE void openYouTubeStudio();
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void refreshAudioDevices();
+    Q_INVOKABLE void cleanupOnClose();
+    Q_INVOKABLE void stopAndQuit();
 
     // state file and config parsing, exposed for tests
     static QJsonObject parseJson(const QByteArray &data);
@@ -107,6 +109,7 @@ private:
     QTimer m_debounce, m_elapsedTimer;
 
     bool m_streaming = false;
+    bool m_cleanedUp = false;
     long long m_startedAt = 0;
     QString m_elapsed, m_mode, m_output;
     bool m_camVisible = false, m_starting = false, m_camFlip = true;
