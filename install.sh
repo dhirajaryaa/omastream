@@ -8,7 +8,30 @@
 #   ./install.sh --uninstall
 set -u
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${REPO:-}"
+if [[ -z "$REPO" || ! -f "$REPO/omastream.pro" ]]; then
+  if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "$(dirname "${BASH_SOURCE[0]}")/omastream.pro" ]]; then
+    REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  elif [[ -f "./omastream.pro" ]]; then
+    REPO="$(pwd)"
+  else
+    # Piped via curl or executed outside repo tree: shallow-clone into a temp directory
+    echo "Cloning Omastream..."
+    TEMP_DIR="$(mktemp -d -t omastream-XXXXXX)"
+    trap 'rm -rf "$TEMP_DIR"' EXIT
+    if command -v git >/dev/null 2>&1; then
+      git clone --depth 1 https://github.com/dhirajaryaa/omastream.git "$TEMP_DIR" || {
+        echo "Error: failed to clone omastream repository." >&2
+        exit 1
+      }
+      REPO="$TEMP_DIR"
+    else
+      echo "Error: git is required to install omastream." >&2
+      exit 1
+    fi
+  fi
+fi
+
 LINK=0
 case "${1:-}" in
   --link) LINK=1 ;;
@@ -52,7 +75,8 @@ if need qmake6 && need g++ && need make; then
   copy "$REPO/build/omastream" "$HOME/.local/bin/omastream" 755
   say "app" "$HOME/.local/bin/omastream"
 else
-  echo "build tools missing — install qmake6, g++, make, then re-run" >&2
+  echo "Build dependencies missing. Please install them first:" >&2
+  echo "  sudo pacman -S --needed base-devel qt6-base qt6-declarative qt6-multimedia qt6-wayland gpu-screen-recorder jq" >&2
   exit 1
 fi
 

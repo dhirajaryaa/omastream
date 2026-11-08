@@ -18,6 +18,18 @@ about 10 MB of RAM, and leaves the CPU heavy lifting to your GPU.
 
 ## Install
 
+### One-Line Install (Recommended)
+
+Run this single command in your terminal to build and install Omastream and its Omarchy shell plugin:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dhirajaryaa/omastream/main/install.sh | bash
+```
+
+Everything installs cleanly into `~/.local` (no root / sudo needed).
+
+---
+
 ### Prerequisites (Arch Linux / Omarchy)
 
 Make sure the required packages are installed:
@@ -33,9 +45,9 @@ sudo pacman -S --needed base-devel qt6-base qt6-declarative qt6-multimedia qt6-w
 
 ---
 
-### Quick Install (User-level, No Root Needed)
+### Manual Clone & Install (Optional)
 
-Clone the repository and run `install.sh`:
+If you prefer cloning the repository manually:
 
 ```sh
 git clone https://github.com/dhirajaryaa/omastream.git
