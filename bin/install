@@ -16,7 +16,10 @@ case "${1:-}" in
 esac
 
 "$ROOT/bin/build"
+mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/omastream"
 install -m 755 "$ROOT/build/omastream" "$HOME/.local/bin/omastream"
+install -m 755 "$ROOT/cli/omastream" "$HOME/.local/bin/omastream-cli"
+install -m 755 "$ROOT/build/libomastream_privacy.so" "$HOME/.local/lib/omastream/libomastream_privacy.so"
 mkdir -p "$HOME/.local/share/applications"
 install -m 644 "$ROOT/pkgbuild/omastream.desktop" "$HOME/.local/share/applications/omastream.desktop"
 mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"

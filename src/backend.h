@@ -43,6 +43,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString screenSharpness READ screenSharpness NOTIFY configChanged)
     Q_PROPERTY(bool camOnStart READ camOnStart NOTIFY configChanged)
     Q_PROPERTY(bool cpuFallback READ cpuFallback NOTIFY configChanged)
+    Q_PROPERTY(QString previewPath READ previewPath CONSTANT)
     Q_PROPERTY(QVariantList systemOutputs READ systemOutputs NOTIFY audioDevicesChanged)
     Q_PROPERTY(QVariantList microphones READ microphones NOTIFY audioDevicesChanged)
 
@@ -107,6 +108,7 @@ public:
     QString screenSharpness() const { return m_config.value("SCREEN_SHARPNESS", "off").toString(); }
     bool camOnStart() const { return m_config.value("CAM_ON_START", "false").toString() == "true"; }
     bool cpuFallback() const { return m_config.value("CPU_FALLBACK", "true").toString() != "false"; }
+    QString previewPath() const { return m_previewPath; }
     QVariantList systemOutputs() const { return m_systemOutputs; }
     QVariantList microphones() const { return m_microphones; }
 
@@ -153,6 +155,7 @@ private:
     void runCommand(const QStringList &args, const QString &niceError);
     QString cliPath() const;
     void applyState(const QJsonObject &state);
+    void updatePreview();
 
     QString m_statePath, m_configPath, m_cli;
     QFileSystemWatcher m_watcher;
@@ -161,7 +164,8 @@ private:
     bool m_streaming = false;
     bool m_cleanedUp = false;
     long long m_startedAt = 0;
-    QString m_elapsed, m_mode, m_output;
+    QString m_elapsed, m_mode, m_output, m_previewPath;
+    int m_previewTickCount = 0;
     bool m_camVisible = false, m_starting = false, m_camFlip = true;
     bool m_privacyActive = false;
     QString m_privacyMode = "blur";

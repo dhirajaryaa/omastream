@@ -179,19 +179,6 @@ Item {
     }
   }
 
-  // ── one privacy overlay per display ───────────────────────────────────────
-  Variants {
-    model: Quickshell.screens
-
-    delegate: Component {
-      PrivacyOverlay {
-        required property var modelData
-        screen: modelData
-        service: streamService
-      }
-    }
-  }
-
   // ── one camera bubble per display ─────────────────────────────────────────
   Variants {
     model: Quickshell.screens

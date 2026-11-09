@@ -301,6 +301,31 @@ mask_key() { # hides the stream key in user-facing output (RTMP endpoints only)
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
+focused_monitor_resolution() {
+  if command -v hyprctl >/dev/null 2>&1; then
+    local r
+    r=$(hyprctl -j monitors 2>/dev/null | jq -r '([.[] | select(.focused)][0] // .[0]) | "\(.width)x\(.height)"' 2>/dev/null)
+    [[ $r =~ ^[0-9]+x[0-9]+$ ]] && { echo "$r"; return; }
+  fi
+  echo "1600x900"
+}
+
+privacy_plugin_path() {
+  local p
+  local self_dir
+  self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+  for p in "$self_dir/../build/libomastream_privacy.so" \
+           "$HOME/.local/lib/omastream/libomastream_privacy.so" \
+           "/usr/lib/omastream/libomastream_privacy.so" \
+           "/usr/local/lib/omastream/libomastream_privacy.so"; do
+    if [[ -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ── start ────────────────────────────────────────────────────────────────────
 cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
   ensure_dirs
@@ -395,7 +420,6 @@ or launch the Omastream window to configure."
       output="${targets[0]}"
       mode="stream"
     else
-      # Multi-platform: pipe to FIFO and duplicate with ffmpeg tee muxer
       output="$STATE_DIR/stream.fifo"
       mode="multi-stream"
       rm -f "$output"
@@ -433,6 +457,13 @@ or launch the Omastream window to configure."
   screen_key="$(capture_monitor_name)"
   res="${res_flag:-$(cfg STREAM_RESOLUTION auto)}"
   res="$(norm_resolution "$res")"
+
+  # privacy filter plugin (native GPU frame clear / shield, zero local monitor effect)
+  local plugin_path
+  if plugin_path="$(privacy_plugin_path)"; then
+    args+=(-p "$plugin_path")
+  fi
+
   args+=(-w "$capture")
   if [[ -n $res && $res != "auto" && $res != "0x0" ]]; then
     args+=(-s "$res")
@@ -440,6 +471,7 @@ or launch the Omastream window to configure."
   args+=(
     -f "$(cfg FPS 30)"
     -k "$(cfg VIDEO_CODEC h264)"
+    -keyint 2
     -bm cbr
     -q "$(cfg VIDEO_BITRATE 4500)"
     -c flv
@@ -474,20 +506,21 @@ or launch the Omastream window to configure."
   fi
   log "start requested ($mode)"
 
-  # Multi-platform: start ffmpeg tee multiplexer in background
+  # Start downstream ffmpeg distributor if multi-streaming (-c copy)
+  local ffmpeg_pid=0
   if [[ $mode == "multi-stream" ]]; then
+    need ffmpeg
     local -a tee_parts=()
     for t in "${targets[@]}"; do
       tee_parts+=("[f=flv:onfail=ignore]$t")
     done
     local tee_spec
     tee_spec="$(IFS='|'; echo "${tee_parts[*]}")"
-    need ffmpeg
     ffmpeg -loglevel error -y -i "$output" -c copy -map 0:v? -map 0:a? -f tee "$tee_spec" >>"$LOG_FILE" 2>&1 < /dev/null &
     ffmpeg_pid=$!
   fi
 
-  # spawn (direct child → the pid we track; no setsid wrapper to lose it)
+  # spawn GSR (direct child → the pid we track; writes directly to destination or stream.fifo)
   rm -f "$GSR_SOCK"
   "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
   local pid=$!
@@ -521,7 +554,7 @@ or launch the Omastream window to configure."
   local plat_str
   plat_str="$(IFS=', '; echo "${target_names[*]}")"
   state_merge "{\"streaming\":true,\"pid\":$pid,\"ffmpeg_pid\":$ffmpeg_pid,\"startedAt\":$started_at,\"mode\":\"$mode\",\"platforms\":\"$plat_str\",\"output\":\"$(printf '%s' "$output" | sed 's/"/\\\\"/g')\",\"monitor\":\"$screen_key\",\"resolution\":\"$res\",\"lastError\":null,\"stopRequested\":false}"
-  log "running: pid=$pid mode=$mode platforms=$plat_str"
+  log "running: pid=$pid ffmpeg=$ffmpeg_pid mode=$mode platforms=$plat_str"
 
   # watchdog — flips state the moment the recorder dies, whatever the cause
   "$0" __monitor "$pid" "$ffmpeg_pid" >/dev/null 2>&1 &
@@ -590,7 +623,7 @@ cmd_stop() {
       kill -0 "$fpid" 2>/dev/null && kill -KILL "$fpid" 2>/dev/null
     fi
   fi
-  rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
+  rm -f "$STATE_DIR/stream.fifo" "$STATE_DIR/preview.jpg" 2>/dev/null || true
 
   if [[ $handled != true && "$(state_get '.streaming' false)" != "true" ]]; then
     die "nothing to stop"
@@ -974,7 +1007,7 @@ __monitor() {
     sleep 0.2
     kill -0 "$fpid" 2>/dev/null && kill -KILL "$fpid" 2>/dev/null || true
   fi
-  rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
+  rm -f "$STATE_DIR/stream.fifo" "$STATE_DIR/preview.jpg" 2>/dev/null || true
   reason="$(recorder_fail_line)"
   state_merge "{\"streaming\":false,\"pid\":0,\"ffmpeg_pid\":0,\"endedAt\":$(now_ms),\"lastError\":\"$(json_escape "$reason")\",\"stopRequested\":false}"
   log "recorder exited unexpectedly; reason saved for the app: $reason"
@@ -1059,7 +1092,7 @@ main() {
     privacy|filter) load_config; cmd_privacy "$@" ;;
     config)         cmd_config "$@" ;;
     help|-h|--help) usage ;;
-    __monitor)      __monitor "${1:-}" ;;
+    __monitor)      __monitor "$@" ;;
     *) die "unknown command: '$cmd' — see omastream --help" ;;
   esac
 }

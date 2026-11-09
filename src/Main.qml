@@ -7,11 +7,11 @@ ApplicationWindow {
     id: win
 
     width: 380
-    height: 660
+    height: 720
     minimumWidth: 380
     maximumWidth: 420
-    minimumHeight: 620
-    maximumHeight: 780
+    minimumHeight: 640
+    maximumHeight: 880
     flags: Qt.Dialog | Qt.WindowCloseButtonHint
     visible: true
     title: "omastream"
@@ -32,6 +32,24 @@ ApplicationWindow {
     property bool ytSaved: false
     property bool twitchSaved: false
     property bool kickSaved: false
+
+    property bool previewExpanded: true
+    property int previewTick: 0
+
+    Timer {
+        id: previewTimer
+        interval: 1200
+        repeat: true
+        running: backend.streaming
+        onTriggered: win.previewTick++
+    }
+
+    Connections {
+        target: backend
+        function onStateChanged() {
+            win.previewTick++
+        }
+    }
 
     Timer {
         id: ytSavedTimer
@@ -1009,6 +1027,163 @@ ApplicationWindow {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: backend.setPrivacyMode("blackout")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Card 5: Remote Feed Preview (Confidence Monitor)
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: (backend.streaming || win.previewExpanded) ? 180 : 42
+                implicitHeight: Layout.preferredHeight
+                radius: 8
+                color: backend.privacyActive ? "#201626" : "#1a1d2b"
+                border.width: 1
+                border.color: backend.privacyActive ? "#f59e0b" : "#232638"
+
+                Behavior on Layout.preferredHeight {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
+
+                ColumnLayout {
+                    anchors {
+                        fill: parent
+                        margins: 10
+                    }
+                    spacing: 8
+
+                    // Top row: Header, status badge & collapse toggle
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Image {
+                            source: "qrc:/icons/monitor.svg"
+                            sourceSize: Qt.size(24, 24)
+                            Layout.preferredWidth: 15
+                            Layout.preferredHeight: 15
+                            fillMode: Image.PreserveAspectFit
+                            opacity: 0.85
+                        }
+
+                        Text {
+                            text: qsTr("Remote Feed Preview")
+                            color: "#d8dae5"
+                            font.pixelSize: 12
+                            font.bold: true
+                            Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            height: 18
+                            width: badgeText.implicitWidth + 12
+                            radius: 9
+                            color: backend.streaming ? (backend.privacyActive ? "#451a03" : "#052e16") : "#1e2235"
+                            border.width: 1
+                            border.color: backend.streaming ? (backend.privacyActive ? "#f59e0b" : "#10b981") : "#2b3048"
+
+                            Text {
+                                id: badgeText
+                                anchors.centerIn: parent
+                                text: backend.streaming ? (backend.privacyActive ? qsTr("MASKED") : qsTr("LIVE")) : qsTr("STANDBY")
+                                color: backend.streaming ? (backend.privacyActive ? "#fbbf24" : "#34d399") : "#7e839b"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
+
+                        Rectangle {
+                            width: 22
+                            height: 22
+                            radius: 4
+                            color: prevToggleMouse.containsMouse ? "#282c42" : "transparent"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: (backend.streaming || win.previewExpanded) ? "▲" : "▼"
+                                color: "#8e93aa"
+                                font.pixelSize: 9
+                            }
+
+                            MouseArea {
+                                id: prevToggleMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.previewExpanded = !win.previewExpanded
+                            }
+                        }
+                    }
+
+                    // Content Box: Video Monitor Display
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 6
+                        color: "#0d0f17"
+                        border.width: 1
+                        border.color: "#1f2233"
+                        clip: true
+                        visible: (backend.streaming || win.previewExpanded)
+
+                        Image {
+                            id: previewImage
+                            anchors.fill: parent
+                            anchors.margins: 2
+                            fillMode: Image.PreserveAspectFit
+                            cache: false
+                            asynchronous: true
+                            source: (backend.streaming && backend.previewPath !== "")
+                                    ? ("file://" + backend.previewPath + "?t=" + win.previewTick)
+                                    : ""
+                            visible: status === Image.Ready && backend.streaming
+                        }
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            visible: !previewImage.visible
+
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: backend.streaming ? qsTr("Waiting for broadcast feed…") : qsTr("Stream Confidence Monitor")
+                                color: "#6b7280"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 10
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: backend.streaming ? qsTr("Connecting encoder") : qsTr("Shows exactly what remote viewers see")
+                                color: "#4b5563"
+                                font.pixelSize: 9
+                            }
+                        }
+
+                        Rectangle {
+                            anchors {
+                                top: parent.top
+                                left: parent.left
+                                margins: 6
+                            }
+                            height: 16
+                            width: prevBoxBadge.implicitWidth + 10
+                            radius: 3
+                            color: backend.privacyActive ? "#b45309" : "#065f46"
+                            opacity: 0.9
+                            visible: backend.streaming && previewImage.visible
+
+                            Text {
+                                id: prevBoxBadge
+                                anchors.centerIn: parent
+                                text: backend.privacyActive ? qsTr("MASK APPLIED") : qsTr("BROADCASTING")
+                                color: "#ffffff"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 8
+                                font.bold: true
                             }
                         }
                     }

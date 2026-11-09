@@ -14,6 +14,8 @@
 #include <QStandardPaths>
 #include <QStringList>
 #include <QUrl>
+#include <QImage>
+#include <QPainter>
 
 Backend::Backend(const QString &statePath, const QString &configPath, const QString &cli, QObject *parent)
     : QObject(parent) {
@@ -22,6 +24,7 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     const QString configHome = basePath("XDG_CONFIG_HOME", "/.config");
     m_configPath = !configPath.isEmpty() ? configPath : configHome + "/omastream/config.env";
     m_cli = !cli.isEmpty() ? cli : cliPath();
+    m_previewPath = QFileInfo(m_statePath).absoluteDir().filePath("preview.jpg");
 
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
@@ -43,6 +46,10 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
         if (m_streaming) {
             m_elapsed = formatElapsed(m_startedAt, QDateTime::currentMSecsSinceEpoch());
             emit stateChanged();
+            if (++m_previewTickCount >= 3) {
+                m_previewTickCount = 0;
+                updatePreview();
+            }
         }
     });
     m_elapsedTimer.start();
@@ -275,10 +282,23 @@ void Backend::applyState(const QJsonObject &state) {
     if (cam.contains("flip") && cam.value("flip").isBool())
         m_camFlip = cam.value("flip").toBool();
 
-    if (privacy.contains("active"))
-        m_privacyActive = privacy.value("active").toBool();
-    if (privacy.contains("mode") && !privacy.value("mode").toString().isEmpty())
-        m_privacyMode = privacy.value("mode").toString();
+    bool privChanged = false;
+    if (privacy.contains("active")) {
+        bool n = privacy.value("active").toBool();
+        if (n != m_privacyActive) {
+            m_privacyActive = n;
+            privChanged = true;
+        }
+    }
+    if (privacy.contains("mode") && !privacy.value("mode").toString().isEmpty()) {
+        QString m = privacy.value("mode").toString();
+        if (m != m_privacyMode) {
+            m_privacyMode = m;
+            privChanged = true;
+        }
+    }
+    if (m_streaming && privChanged)
+        updatePreview();
 
     // The recorder's watchdog speaks through state.json when it dies alone.
     const QString reason = state.value("lastError").toString();
@@ -563,4 +583,34 @@ void Backend::refreshAudioDevices() {
     if (pactl.isEmpty())
         return;
     m_audioProbe.start(pactl, {"-f", "json", "list", "sources"});
+}
+
+void Backend::updatePreview() {
+    if (!m_streaming || m_previewPath.isEmpty())
+        return;
+
+    if (m_privacyActive) {
+        QImage img(360, 202, QImage::Format_RGB32);
+        QColor bg = (m_privacyMode == "blackout") ? QColor(0, 0, 0)
+                  : (m_privacyMode == "blur")     ? QColor(16, 23, 38)
+                                                  : QColor(9, 10, 16);
+        img.fill(bg);
+        QPainter p(&img);
+        p.setPen(QColor(220, 225, 240));
+        QFont f = p.font();
+        f.setPixelSize(12);
+        f.setBold(true);
+        p.setFont(f);
+        QString label = (m_privacyMode == "blur") ? QStringLiteral("STREAM MASKED (FROSTED BLUR)")
+                                                  : QStringLiteral("STREAM MASKED (SOLID COVER)");
+        p.drawText(img.rect(), Qt::AlignCenter, label);
+        img.save(m_previewPath, "JPG", 85);
+    } else {
+        const QString tmp = m_previewPath + ".tmp";
+        if (QFile::exists(tmp)) {
+            QFile::remove(m_previewPath);
+            QFile::rename(tmp, m_previewPath);
+        }
+        QProcess::startDetached("grim", QStringList{"-s", "0.2", tmp});
+    }
 }

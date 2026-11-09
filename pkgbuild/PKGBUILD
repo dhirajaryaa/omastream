@@ -1,7 +1,7 @@
 pkgname=omastream
 pkgver=1.2.1
 pkgrel=1
-pkgdesc='Multi-platform live streaming studio for Omarchy & Arch Linux (YouTube, Twitch, Kick) — privacy filter mask, gpu-screen-recorder encode, zero-copy relay, camera bubble, one honest window'
+pkgdesc='Multi-platform live streaming studio for Omarchy & Arch Linux (YouTube, Twitch, Kick) — native GPU privacy filter plugin, in-app confidence preview, camera bubble, one honest window'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'libpulse' 'gpu-screen-recorder' 'jq')
@@ -18,6 +18,7 @@ package() {
   cd "$startdir/.."
   install -Dm755 build/omastream "$pkgdir/usr/bin/omastream"
   install -Dm755 cli/omastream "$pkgdir/usr/bin/omastream-cli"
+  install -Dm755 build/libomastream_privacy.so "$pkgdir/usr/lib/omastream/libomastream_privacy.so"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/omastream.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omastream.svg"
   install -Dm644 "$startdir/omastream.desktop" "$pkgdir/usr/share/applications/omastream.desktop"

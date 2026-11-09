@@ -7,5 +7,6 @@ cd "$ROOT/build"
 
 qmake6 "$ROOT/omastream.pro"
 make -j"$(nproc)"
+gcc -O2 -shared -fPIC -o "$ROOT/build/libomastream_privacy.so" "$ROOT/src/plugin_privacy.c" -I/usr/include/gsr -lGLESv2
 
-echo "Built $ROOT/build/omastream"
+echo "Built $ROOT/build/omastream and $ROOT/build/libomastream_privacy.so"
