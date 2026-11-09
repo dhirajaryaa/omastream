@@ -17,7 +17,6 @@ PanelWindow {
 
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
   readonly property string statePath: (service && service.statePath) ? service.statePath : (stateHome + "/omastream/state.json")
-  readonly property string omastreamBin: (service && service.omastreamBin) ? service.omastreamBin : ((Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli")
 
   property var localState: ({})
 
@@ -70,19 +69,19 @@ PanelWindow {
   // Only the top dismiss pill intercepts mouse clicks; entire remainder of screen is click-through
   mask: Region { item: dismissCard }
 
-  Process {
-    id: cmdProc
-    onExited: {
-      overlayStateFile.reload()
-      if (root.service && typeof root.service.reloadState === "function") {
-        root.service.reloadState()
-      }
-    }
-  }
+  property real lastDisableTime: 0
 
   function disablePrivacy() {
-    cmdProc.command = [root.omastreamBin, "privacy", "off"]
-    cmdProc.running = true
+    var now = Date.now()
+    if (now - lastDisableTime < 400) return
+    lastDisableTime = now
+
+    if (root.service && typeof root.service.runCli === "function") {
+      root.service.runCli(["privacy", "off"])
+      return
+    }
+    var shScript = 'if command -v omastream-cli >/dev/null 2>&1; then exec omastream-cli "$@"; elif [ -x "$HOME/.local/bin/omastream-cli" ]; then exec "$HOME/.local/bin/omastream-cli" "$@"; else exec /usr/bin/omastream-cli "$@"; fi'
+    Quickshell.execDetached(["sh", "-c", shScript, "omastream-cli", "privacy", "off"])
   }
 
   // ── Background Filter Surfaces ─────────────────────────────────────────────

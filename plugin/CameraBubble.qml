@@ -24,7 +24,6 @@ PanelWindow {
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
   readonly property string statePath: (service && service.statePath) ? service.statePath : (stateHome + "/omastream/state.json")
   readonly property string confPath: (service && service.confPath) ? service.confPath : (Quickshell.env("HOME") + "/.config/omastream/config.env")
-  readonly property string omastreamBin: (service && service.omastreamBin) ? service.omastreamBin : ((Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli")
 
   property var localState: ({})
   property var localConf: ({})
@@ -89,9 +88,25 @@ PanelWindow {
   // ── camera properties ────────────────────────────────────────────────────────
   readonly property var cam: service && service.cam ? service.cam : (localState.cam || null)
   readonly property bool camVisible: cam ? cam.visible === true : false
-  readonly property string shape: service && service.camShape ? service.camShape : (cam && cam.shape ? String(cam.shape) : "1:1")
-  readonly property bool flip: cam && cam.flip !== null && cam.flip !== undefined
-    ? cam.flip === true : (service && service.camConf ? service.camConf.flip === true : (localConf.flip !== false))
+
+  property string localShape: ""
+  readonly property string shape: localShape.length > 0
+    ? localShape
+    : (service && service.camShape ? service.camShape : (cam && cam.shape ? String(cam.shape) : "1:1"))
+
+  property var localFlip: null
+  readonly property bool flip: localFlip !== null
+    ? (localFlip === true)
+    : (cam && cam.flip !== null && cam.flip !== undefined
+      ? cam.flip === true
+      : (service && service.camConf ? service.camConf.flip === true : (localConf.flip !== false)))
+
+  property bool locallyHidden: false
+  onCamVisibleChanged: {
+    if (root.camVisible) locallyHidden = false
+  }
+
+  property bool userPositioned: false
 
   // Corner radius ratio (0.0 = sharp corners, 1.0 = fully round)
   property real radiusRatio: {
@@ -124,6 +139,9 @@ PanelWindow {
     if (!allGeom) return null
     if (allGeom[myKey]) return allGeom[myKey]
     if (allGeom[shape + "@screen"]) return allGeom[shape + "@screen"]
+    for (var k in allGeom) {
+      if (k.indexOf(shape + "@") === 0 && allGeom[k]) return allGeom[k]
+    }
     return null
   }
 
@@ -144,7 +162,7 @@ PanelWindow {
   readonly property bool canShowCamera: service ? (service.streaming || appRunning) : (localState.streaming === true || appRunning)
 
   // Visible ONLY when requested, on target screen, AND either live streaming or app is open
-  visible: root.camVisible && root.isTargetScreen && root.canShowCamera
+  visible: !root.locallyHidden && root.camVisible && root.isTargetScreen && root.canShowCamera
 
   // ── geometry fractions & dimensions ──────────────────────────────────────────
   readonly property var defaults: {
@@ -160,15 +178,16 @@ PanelWindow {
   function syncFromGeom() {
     if (moving || resizing) return
     var geom = shapeGeom
-    var def = defaults
-    if (geom && typeof geom.x === "number") currentXFrac = geom.x
-    else if (def) currentXFrac = def.x
-
-    if (geom && typeof geom.y === "number") currentYFrac = geom.y
-    else if (def) currentYFrac = def.y
-
-    if (geom && typeof geom.size === "number") currentSizeFrac = geom.size
-    else if (def) currentSizeFrac = def.size
+    if (geom && typeof geom.x === "number") {
+      currentXFrac = geom.x
+      if (typeof geom.y === "number") currentYFrac = geom.y
+      if (typeof geom.size === "number") currentSizeFrac = geom.size
+      root.userPositioned = true
+    } else if (!root.userPositioned && defaults) {
+      currentXFrac = defaults.x
+      currentYFrac = defaults.y
+      currentSizeFrac = defaults.size
+    }
   }
 
   onShapeGeomChanged: syncFromGeom()
@@ -207,19 +226,11 @@ PanelWindow {
   mask: Region { item: frame }
 
   // ── persistence & commands ──────────────────────────────────────────────────
-  Process {
-    id: saveProc
-    onExited: () => {
-      bubbleStateFile.reload()
-      if (root.service && typeof root.service.reloadState === "function") {
-        root.service.reloadState()
-      }
-    }
-  }
-
-  Process {
-    id: cmdProc
-    onExited: () => {
+  Timer {
+    id: delayedReload
+    interval: 150
+    repeat: false
+    onTriggered: {
       bubbleStateFile.reload()
       if (root.service && typeof root.service.reloadState === "function") {
         root.service.reloadState()
@@ -228,20 +239,82 @@ PanelWindow {
   }
 
   function runCmd(args) {
-    cmdProc.command = [omastreamBin].concat(args)
-    cmdProc.running = true
+    if (root.service && typeof root.service.runCli === "function") {
+      root.service.runCli(args)
+    } else {
+      var shScript = 'if command -v omastream-cli >/dev/null 2>&1; then exec omastream-cli "$@"; elif [ -x "$HOME/.local/bin/omastream-cli" ]; then exec "$HOME/.local/bin/omastream-cli" "$@"; else exec /usr/bin/omastream-cli "$@"; fi'
+      Quickshell.execDetached(["sh", "-c", shScript, "omastream-cli"].concat(args))
+    }
+    delayedReload.restart()
   }
 
-  function saveNow() {
-    saveProc.command = [omastreamBin, "cam", "save", JSON.stringify({
+  // ── Debounced and Throttled State Persistence ──────────────────────────────
+  property real lastSaveTime: 0
+
+  Timer {
+    id: saveDebounceTimer
+    interval: 220
+    repeat: false
+    onTriggered: root.executeSave()
+  }
+
+  function saveNow(immediate) {
+    root.userPositioned = true
+    var now = Date.now()
+    if (immediate === true || (now - root.lastSaveTime > 650)) {
+      saveDebounceTimer.stop()
+      root.executeSave()
+    } else {
+      saveDebounceTimer.restart()
+    }
+  }
+
+  function executeSave() {
+    root.lastSaveTime = Date.now()
+    var payload = JSON.stringify({
       shape: shape,
       screen: screenName,
       x: currentXFrac,
       y: currentYFrac,
       size: currentSizeFrac,
       radius: root.radiusRatio
-    })]
-    saveProc.running = true
+    })
+    runCmd(["cam", "save", payload])
+  }
+
+  property real lastShapeTime: 0
+  function setShape(newShape) {
+    if (root.shape === newShape) return
+    var now = Date.now()
+    if (now - root.lastShapeTime < 250) return
+    root.lastShapeTime = now
+
+    root.localShape = newShape
+    root.userPositioned = false
+    root.syncFromGeom()
+    root.runCmd(["cam", "shape", newShape])
+    root.saveNow(true)
+  }
+
+  property real lastFlipTime: 0
+  function toggleFlip() {
+    var now = Date.now()
+    if (now - root.lastFlipTime < 250) return
+    root.lastFlipTime = now
+
+    var nextVal = !root.flip
+    root.localFlip = nextVal
+    root.runCmd(["cam", "flip", nextVal ? "true" : "false"])
+  }
+
+  property real lastCloseTime: 0
+  function closeBubble() {
+    var now = Date.now()
+    if (now - root.lastCloseTime < 300) return
+    root.lastCloseTime = now
+
+    root.locallyHidden = true
+    root.runCmd(["cam", "off"])
   }
 
   function snapCorner(corner) {
@@ -264,7 +337,8 @@ PanelWindow {
     }
     currentXFrac = Math.max(0, Math.min(nx, 1 - sw))
     currentYFrac = Math.max(0, Math.min(ny, 1 - sh))
-    saveNow()
+    userPositioned = true
+    saveNow(true)
   }
 
   // ── camera capture pipeline ──────────────────────────────────────────────────
@@ -520,7 +594,7 @@ PanelWindow {
             height: Style.space(22)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.runCmd(["cam", "shape", "1:1"])
+            onClicked: root.setShape("1:1")
 
             Rectangle {
               anchors.fill: parent
@@ -545,7 +619,7 @@ PanelWindow {
             height: Style.space(22)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.runCmd(["cam", "shape", "16:9"])
+            onClicked: root.setShape("16:9")
 
             Rectangle {
               anchors.fill: parent
@@ -570,7 +644,7 @@ PanelWindow {
             height: Style.space(22)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.runCmd(["cam", "shape", "circle"])
+            onClicked: root.setShape("circle")
 
             Rectangle {
               anchors.fill: parent
@@ -701,7 +775,7 @@ PanelWindow {
             height: Style.space(22)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.runCmd(["cam", "flip", root.flip ? "false" : "true"])
+            onClicked: root.toggleFlip()
 
             Rectangle {
               anchors.fill: parent
@@ -732,7 +806,7 @@ PanelWindow {
             height: Style.space(22)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.runCmd(["cam", "off"])
+            onClicked: root.closeBubble()
 
             Rectangle {
               anchors.fill: parent
@@ -772,7 +846,7 @@ PanelWindow {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
               root.radiusRatio = 0.0
-              root.saveNow()
+              root.saveNow(true)
             }
 
             Rectangle {
@@ -833,6 +907,7 @@ PanelWindow {
                 var localX = mouseX - Style.space(6)
                 var ratio = Math.max(0.0, Math.min(1.0, localX / sliderTrack.width))
                 root.radiusRatio = ratio
+                root.saveNow(false)
               }
 
               onPressed: (mouse) => {
@@ -844,11 +919,11 @@ PanelWindow {
               }
               onReleased: {
                 root.sliderActive = false
-                root.saveNow()
+                root.saveNow(true)
               }
               onCanceled: {
                 root.sliderActive = false
-                root.saveNow()
+                root.saveNow(true)
               }
             }
           }
@@ -861,7 +936,7 @@ PanelWindow {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
               root.radiusRatio = 1.0
-              root.saveNow()
+              root.saveNow(true)
             }
 
             Rectangle {
@@ -936,12 +1011,12 @@ PanelWindow {
   function commitMove() {
     if (!root.moveDirty) return
     root.moveDirty = false
-    saveNow()
+    saveNow(true)
   }
 
   function commitResize() {
     if (!root.resizeDirty) return
     root.resizeDirty = false
-    saveNow()
+    saveNow(true)
   }
 }

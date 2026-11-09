@@ -22,7 +22,9 @@ The app is the main surface: press **Space** to go live, press it again to stop.
 - **Live Camera Studio Overlay**: Floating webcam self-view composited onto your desktop display. Instant framing preview on launch, interactive shapes (Circle, 1:1 Square, 16:9 Wide), dynamic corner rounding slider, selfie mirror, and magnetic corner snapping.
 - **Hardware-Accelerated Capture**: Direct GPU capture via `gpu-screen-recorder` with automatic CPU fallback when GPU encoding is unsupported.
 - **Audio Routing & Text Sharpness**: Independent desktop system audio and microphone routing. Built-in screen text sharpness filters for crisp text rendering on code and terminals.
-- **Live Privacy Filter & Stream Mask**: Instantly conceal sensitive information, credentials, and API keys during live broadcasts without interrupting your stream. Three developer-focused filter presets: **Frosted Blur** (dark frosted acrylic veil over code/secrets with click-through so you can paste and configure safely), **Privacy Shield** (stream paused / be right back studio curtain), and **Blackout** (pure black screen). Controllable instantly from the app, top bar LIVE badge popup, shortcut (`P`), or CLI.
+- **Live Privacy Filter & Stream Mask**: Instantly conceal sensitive information, credentials, and API keys during live broadcasts without interrupting your stream. Three developer-focused filter presets: **Frosted Blur** (dark frosted acrylic veil over code/secrets with click-through so you can paste and configure safely), **Privacy Shield** (stream paused / be right back studio curtain), and **Blackout** (pure black screen). Controllable instantly from the app with live status pills (`MASKED (FROSTED BLUR)`, `MASKED (STREAM PAUSED)`, `MASKED (BLACKOUT)`), top bar LIVE badge popup, shortcut (`P`), or CLI—with zero distracting desktop notifications.
+- **Visual Key Management & Feedback**: Dedicated credential cards with instant `Saved ✓` visual confirmation buttons, active banner feedback, and quick dashboard links for YouTube, Twitch, and Kick.
+- **Webcam Overlay HUD & Persistent Geometry**: Floating webcam overlay with instant on-glass HUD controls (1:1 Square, 16:9 Widescreen, Circle, Mirror Flip, Screen Corners, Close). Position, custom dimensions, and corner curvature persist reliably without resetting when toggling privacy masks.
 - **Security & Privacy First**: All stream keys are kept private on your local filesystem (`chmod 600`), masked in logs and CLI outputs, and never committed or tracked. Zero telemetry.
 
 ---
@@ -141,10 +143,12 @@ The floating camera bubble is always interactive and visible both during preview
 
 The top bar remains completely normal during desktop use. While streaming:
 
-- A red **LIVE** badge appears on the top bar showing live stream elapsed time.
+- A red **LIVE** (or amber **MASKED**) badge appears on the top bar showing live stream elapsed time and privacy mask status.
 - **Left-click** opens a quick control popup:
-  - **Stop Stream**: Stops the stream immediately.
+  - **Stop Stream / Stop Recording**: Stops the broadcast immediately.
   - **Hide / Show Webcam**: Toggles the camera bubble overlay.
+  - **Privacy Filter Toggle**: Instantly toggles the privacy mask on/off without interrupting the stream.
+  - **Privacy Mode Selectors**: Quick switch between **Blur**, **Shield**, and **Blackout**.
 - **Middle-click** directly toggles the camera bubble.
 - **Right-click** opens YouTube Studio.
 - **Real-Time Synchronization**: Stopping or toggling the stream from the app, top bar popup, or `omastream-cli stop` synchronizes instantly across all surfaces.

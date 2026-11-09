@@ -83,9 +83,11 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
     if (QDir(sysPluginDir).exists()) {
         QDir().mkpath(userPluginDir);
         for (const char *file : {"manifest.json", "Service.qml", "CameraBubble.qml", "PrivacyOverlay.qml", "BarWidget.qml"}) {
+            const QString src = sysPluginDir + "/" + QLatin1String(file);
             const QString dst = userPluginDir + "/" + QLatin1String(file);
-            if (!QFile::exists(dst)) {
-                QFile::copy(sysPluginDir + "/" + QLatin1String(file), dst);
+            if (QFile::exists(src)) {
+                QFile::remove(dst);
+                QFile::copy(src, dst);
             }
         }
     }
@@ -440,18 +442,18 @@ void Backend::cycleCamShape() {
 void Backend::setCamShape(const QString &shape) {
     if (shape != "circle" && shape != "1:1" && shape != "16:9")
         return;
-    if (m_camShape != shape) {
-        m_camShape = shape;
-        emit stateChanged();
-    }
+    if (m_camShape == shape)
+        return;
+    m_camShape = shape;
+    emit stateChanged();
     runCommand({"cam", "shape", shape}, {});
 }
 
 void Backend::setCamFlip(bool flip) {
-    if (m_camFlip != flip) {
-        m_camFlip = flip;
-        emit stateChanged();
-    }
+    if (m_camFlip == flip)
+        return;
+    m_camFlip = flip;
+    emit stateChanged();
     setSetting("CAM_FLIP", flip ? QStringLiteral("true") : QStringLiteral("false"));
     runCommand({"cam", "flip", flip ? QStringLiteral("true") : QStringLiteral("false")}, {});
 }
@@ -495,20 +497,20 @@ void Backend::togglePrivacy() {
 }
 
 void Backend::setPrivacyActive(bool active) {
-    if (m_privacyActive != active) {
-        m_privacyActive = active;
-        emit stateChanged();
-    }
+    if (m_privacyActive == active)
+        return;
+    m_privacyActive = active;
+    emit stateChanged();
     runCommand({"privacy", active ? "on" : "off"}, {});
 }
 
 void Backend::setPrivacyMode(const QString &mode) {
     if (mode != "blur" && mode != "shield" && mode != "blackout")
         return;
-    if (m_privacyMode != mode) {
-        m_privacyMode = mode;
-        emit stateChanged();
-    }
+    if (m_privacyMode == mode)
+        return;
+    m_privacyMode = mode;
+    emit stateChanged();
     runCommand({"privacy", "mode", mode}, {});
 }
 
@@ -544,6 +546,8 @@ void Backend::setSetting(const QString &key, const QVariant &value) {
     if (!allowed.contains(key) || value.isNull())
         return;
     const QString text = value.toString();
+    if (m_config.value(key) == text)
+        return;
     if (text.contains('\n') || text.contains('\'') || text.contains('"')) {
         m_commandError = tr("Not a valid value for %1").arg(key);
         emit lastErrorChanged();

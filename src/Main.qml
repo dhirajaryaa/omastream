@@ -7,11 +7,11 @@ ApplicationWindow {
     id: win
 
     width: 380
-    height: 620
+    height: 660
     minimumWidth: 380
     maximumWidth: 420
-    minimumHeight: 580
-    maximumHeight: 720
+    minimumHeight: 620
+    maximumHeight: 780
     flags: Qt.Dialog | Qt.WindowCloseButtonHint
     visible: true
     title: "omastream"
@@ -28,6 +28,28 @@ ApplicationWindow {
     property bool ytKeyVisible: false
     property bool twitchKeyVisible: false
     property bool kickKeyVisible: false
+
+    property bool ytSaved: false
+    property bool twitchSaved: false
+    property bool kickSaved: false
+
+    Timer {
+        id: ytSavedTimer
+        interval: 2200
+        onTriggered: win.ytSaved = false
+    }
+
+    Timer {
+        id: twitchSavedTimer
+        interval: 2200
+        onTriggered: win.twitchSaved = false
+    }
+
+    Timer {
+        id: kickSavedTimer
+        interval: 2200
+        onTriggered: win.kickSaved = false
+    }
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: backend.toggleStream() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: backend.toggleCam() }
@@ -832,22 +854,23 @@ ApplicationWindow {
             // Card 4: Privacy Filter (Stream Shield / Blur)
             Rectangle {
                 Layout.fillWidth: true
-                height: backend.privacyActive ? 78 : 38
+                Layout.preferredHeight: backend.privacyActive ? 86 : 42
+                implicitHeight: Layout.preferredHeight
                 radius: 8
-                color: backend.privacyActive ? "#1e1624" : "#1a1d2b"
+                color: backend.privacyActive ? "#221926" : "#1a1d2b"
                 border.width: 1
-                border.color: backend.privacyActive ? "#d97706" : "#232638"
+                border.color: backend.privacyActive ? "#f59e0b" : "#232638"
 
-                Behavior on height {
-                    NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                Behavior on Layout.preferredHeight {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
                 }
 
                 ColumnLayout {
                     anchors {
                         fill: parent
-                        margins: 9
+                        margins: 10
                     }
-                    spacing: 6
+                    spacing: 8
 
                     // Top row: Header & toggle
                     RowLayout {
@@ -857,8 +880,8 @@ ApplicationWindow {
                         Image {
                             source: "qrc:/icons/shield.svg"
                             sourceSize: Qt.size(24, 24)
-                            Layout.preferredWidth: 15
-                            Layout.preferredHeight: 15
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
                             fillMode: Image.PreserveAspectFit
                             opacity: backend.privacyActive ? 1.0 : 0.6
                         }
@@ -872,16 +895,21 @@ ApplicationWindow {
 
                         // Status indicator pill
                         Rectangle {
-                            radius: 3
-                            implicitWidth: privacyBadgeText.implicitWidth + 8
-                            implicitHeight: 16
-                            color: backend.privacyActive ? "#33d97706" : "#202334"
+                            radius: 4
+                            implicitWidth: privacyBadgeText.implicitWidth + 10
+                            implicitHeight: 18
+                            color: backend.privacyActive ? "#33f59e0b" : "#202334"
+                            border.width: backend.privacyActive ? 1 : 0
+                            border.color: "#f59e0b"
 
                             Text {
                                 id: privacyBadgeText
                                 anchors.centerIn: parent
-                                text: backend.privacyActive ? qsTr("MASKED (STREAM SAFE)") : qsTr("OFF")
-                                color: backend.privacyActive ? "#f59e0b" : "#5e6378"
+                                text: backend.privacyActive
+                                    ? (backend.privacyMode === "shield" ? qsTr("MASKED (STREAM PAUSED)")
+                                      : (backend.privacyMode === "blackout" ? qsTr("MASKED (BLACKOUT)") : qsTr("MASKED (FROSTED BLUR)")))
+                                    : qsTr("OFF · SCREEN VISIBLE")
+                                color: backend.privacyActive ? "#f59e0b" : "#6b7280"
                                 font.family: "JetBrains Mono, monospace"
                                 font.pixelSize: 9
                                 font.bold: true
@@ -906,9 +934,9 @@ ApplicationWindow {
                         // Blur pill
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 24
+                            height: 26
                             radius: 4
-                            color: backend.privacyMode === "blur" ? "#384166" : (blurMouse.containsMouse ? "#282c42" : "#202334")
+                            color: backend.privacyMode === "blur" ? "#384166" : (blurMouse.containsMouse ? "#282c42" : "#1a1e30")
                             border.width: 1
                             border.color: backend.privacyMode === "blur" ? "#5e81f4" : "#2c3046"
 
@@ -933,9 +961,9 @@ ApplicationWindow {
                         // Shield pill
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 24
+                            height: 26
                             radius: 4
-                            color: backend.privacyMode === "shield" ? "#384166" : (shieldMouse.containsMouse ? "#282c42" : "#202334")
+                            color: backend.privacyMode === "shield" ? "#384166" : (shieldMouse.containsMouse ? "#282c42" : "#1a1e30")
                             border.width: 1
                             border.color: backend.privacyMode === "shield" ? "#5e81f4" : "#2c3046"
 
@@ -960,9 +988,9 @@ ApplicationWindow {
                         // Blackout pill
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 24
+                            height: 26
                             radius: 4
-                            color: backend.privacyMode === "blackout" ? "#384166" : (blackoutMouse.containsMouse ? "#282c42" : "#202334")
+                            color: backend.privacyMode === "blackout" ? "#384166" : (blackoutMouse.containsMouse ? "#282c42" : "#1a1e30")
                             border.width: 1
                             border.color: backend.privacyMode === "blackout" ? "#5e81f4" : "#2c3046"
 
@@ -986,16 +1014,20 @@ ApplicationWindow {
                     }
                 }
             }
-        }
 
-        // Footer note
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Space: Go Live · C: Camera · P: Privacy Filter")
-            color: "#5e6378"
-            font.family: "JetBrains Mono, monospace"
-            font.pixelSize: 10
-        }
+            Item {
+                Layout.fillHeight: true
+                Layout.minimumHeight: 6
+            }
+
+            // Footer note
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: qsTr("Space: Go Live · C: Camera · P: Privacy Filter")
+                color: "#5e6378"
+                font.family: "JetBrains Mono, monospace"
+                font.pixelSize: 10
+            }
     }
 
     // ── Settings Sheet Overlay ────────────────────────────────────────────────
@@ -1052,6 +1084,41 @@ ApplicationWindow {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: win.settingsOpen = false
+                    }
+                }
+            }
+
+            // Saved Feedback Banner
+            Rectangle {
+                Layout.fillWidth: true
+                height: (win.ytSaved || win.twitchSaved || win.kickSaved) ? 28 : 0
+                visible: height > 0
+                radius: 6
+                color: "#163a2a"
+                border.width: 1
+                border.color: "#10b981"
+                clip: true
+
+                Behavior on height {
+                    NumberAnimation { duration: 150 }
+                }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 6
+
+                    Text {
+                        text: "✓"
+                        color: "#10b981"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: qsTr("Credentials saved successfully")
+                        color: "#34d399"
+                        font.pixelSize: 11
+                        font.bold: true
                     }
                 }
             }
@@ -1156,7 +1223,10 @@ ApplicationWindow {
                                         color: "#f0f1f5"
                                         font.pixelSize: 11
                                         background: null
-                                        onTextEdited: win.pendingYtKey = text
+                                        onTextEdited: {
+                                            win.pendingYtKey = text
+                                            win.ytSaved = false
+                                        }
                                         onEditingFinished: {
                                             if (text !== backend.youtubeKey) {
                                                 backend.setSetting("YOUTUBE_KEY", text)
@@ -1191,15 +1261,19 @@ ApplicationWindow {
                                     }
 
                                     Rectangle {
-                                        width: ytSaveText.implicitWidth + 14
+                                        width: ytSaveText.implicitWidth + 16
                                         height: 26
                                         radius: 4
-                                        color: ytSaveMouse.containsMouse ? "#c72828" : "#b31217"
+                                        color: win.ytSaved ? "#10b981" : (ytSaveMouse.containsMouse ? "#c72828" : "#b31217")
+
+                                        Behavior on color {
+                                            ColorAnimation { duration: 150 }
+                                        }
 
                                         Text {
                                             id: ytSaveText
                                             anchors.centerIn: parent
-                                            text: qsTr("Save")
+                                            text: win.ytSaved ? qsTr("Saved ✓") : qsTr("Save")
                                             color: "#ffffff"
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1213,6 +1287,8 @@ ApplicationWindow {
                                             onClicked: {
                                                 backend.setSetting("YOUTUBE_KEY", ytKeyField.text)
                                                 backend.setSetting("STREAM_KEY", ytKeyField.text)
+                                                win.ytSaved = true
+                                                ytSavedTimer.restart()
                                             }
                                         }
                                     }
@@ -1311,7 +1387,10 @@ ApplicationWindow {
                                         color: "#f0f1f5"
                                         font.pixelSize: 11
                                         background: null
-                                        onTextEdited: win.pendingTwitchKey = text
+                                        onTextEdited: {
+                                            win.pendingTwitchKey = text
+                                            win.twitchSaved = false
+                                        }
                                         onEditingFinished: {
                                             if (text !== backend.twitchKey)
                                                 backend.setSetting("TWITCH_KEY", text)
@@ -1344,15 +1423,19 @@ ApplicationWindow {
                                     }
 
                                     Rectangle {
-                                        width: twitchSaveText.implicitWidth + 14
+                                        width: twitchSaveText.implicitWidth + 16
                                         height: 26
                                         radius: 4
-                                        color: twitchSaveMouse.containsMouse ? "#772ce8" : "#9146ff"
+                                        color: win.twitchSaved ? "#10b981" : (twitchSaveMouse.containsMouse ? "#772ce8" : "#9146ff")
+
+                                        Behavior on color {
+                                            ColorAnimation { duration: 150 }
+                                        }
 
                                         Text {
                                             id: twitchSaveText
                                             anchors.centerIn: parent
-                                            text: qsTr("Save")
+                                            text: win.twitchSaved ? qsTr("Saved ✓") : qsTr("Save")
                                             color: "#ffffff"
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1363,7 +1446,11 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: backend.setSetting("TWITCH_KEY", twitchKeyField.text)
+                                            onClicked: {
+                                                backend.setSetting("TWITCH_KEY", twitchKeyField.text)
+                                                win.twitchSaved = true
+                                                twitchSavedTimer.restart()
+                                            }
                                         }
                                     }
                                 }
@@ -1461,7 +1548,10 @@ ApplicationWindow {
                                         color: "#f0f1f5"
                                         font.pixelSize: 11
                                         background: null
-                                        onTextEdited: win.pendingKickKey = text
+                                        onTextEdited: {
+                                            win.pendingKickKey = text
+                                            win.kickSaved = false
+                                        }
                                         onEditingFinished: {
                                             if (text !== backend.kickKey)
                                                 backend.setSetting("KICK_KEY", text)
@@ -1494,15 +1584,19 @@ ApplicationWindow {
                                     }
 
                                     Rectangle {
-                                        width: kickSaveText.implicitWidth + 14
+                                        width: kickSaveText.implicitWidth + 16
                                         height: 26
                                         radius: 4
-                                        color: kickSaveMouse.containsMouse ? "#3eb813" : "#2d8b0e"
+                                        color: win.kickSaved ? "#10b981" : (kickSaveMouse.containsMouse ? "#3eb813" : "#2d8b0e")
+
+                                        Behavior on color {
+                                            ColorAnimation { duration: 150 }
+                                        }
 
                                         Text {
                                             id: kickSaveText
                                             anchors.centerIn: parent
-                                            text: qsTr("Save")
+                                            text: win.kickSaved ? qsTr("Saved ✓") : qsTr("Save")
                                             color: "#ffffff"
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1513,7 +1607,11 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: backend.setSetting("KICK_KEY", kickKeyField.text)
+                                            onClicked: {
+                                                backend.setSetting("KICK_KEY", kickKeyField.text)
+                                                win.kickSaved = true
+                                                kickSavedTimer.restart()
+                                            }
                                         }
                                     }
                                 }

@@ -13,10 +13,14 @@ import qs.Commons
 Item {
   id: streamService
 
-  readonly property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
   readonly property string statePath: stateHome + "/omastream/state.json"
   readonly property string confPath: Quickshell.env("HOME") + "/.config/omastream/config.env"
+
+  function runCli(args) {
+    var shScript = 'if command -v omastream-cli >/dev/null 2>&1; then exec omastream-cli "$@"; elif [ -x "$HOME/.local/bin/omastream-cli" ]; then exec "$HOME/.local/bin/omastream-cli" "$@"; else exec /usr/bin/omastream-cli "$@"; fi'
+    Quickshell.execDetached(["sh", "-c", shScript, "omastream-cli"].concat(args))
+  }
 
   // Detect whether the omastream GUI app window is open
   readonly property bool appRunning: {
@@ -51,9 +55,9 @@ Item {
   // It only opens when triggered by omastream-app or user action.
   Component.onCompleted: {
     if (!streamService.streaming && !streamService.appRunning) {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
+      streamService.runCli(["cam", "off"])
     }
-    Quickshell.execDetached([streamService.omastreamBin, "privacy", "off"])
+    streamService.runCli(["privacy", "off"])
   }
 
   // ── runtime state snapshot (CLI is the writer) ─────────────────────────────
@@ -131,7 +135,7 @@ Item {
       streamService.reloadState()
       // If neither streaming nor the app is open, force cam off so it never lingers on the desktop
       if (streamService.camVisible && !streamService.streaming && !streamService.appRunning) {
-        Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
+        streamService.runCli(["cam", "off"])
       }
     }
   }
@@ -150,27 +154,27 @@ Item {
       })
     }
     function toggleCam(): string {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "toggle"])
+      streamService.runCli(["cam", "toggle"])
       return "ok"
     }
     function snapCorner(corner: string): string {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "corner", corner])
+      streamService.runCli(["cam", "corner", corner])
       return "ok"
     }
     function setShape(shape: string): string {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "shape", shape])
+      streamService.runCli(["cam", "shape", shape])
       return "ok"
     }
     function setRadius(radius: string): string {
-      Quickshell.execDetached([streamService.omastreamBin, "cam", "radius", radius])
+      streamService.runCli(["cam", "radius", radius])
       return "ok"
     }
     function togglePrivacy(): string {
-      Quickshell.execDetached([streamService.omastreamBin, "privacy", "toggle"])
+      streamService.runCli(["privacy", "toggle"])
       return "ok"
     }
     function setPrivacyMode(mode: string): string {
-      Quickshell.execDetached([streamService.omastreamBin, "privacy", "mode", mode])
+      streamService.runCli(["privacy", "mode", mode])
       return "ok"
     }
   }

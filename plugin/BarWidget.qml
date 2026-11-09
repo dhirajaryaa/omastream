@@ -14,7 +14,6 @@ BarWidget {
   id: root
   moduleName: "dhirajarya.omastream"
 
-  readonly property string omastreamBin: (Quickshell.env("HOME") || "/home/user") + "/.local/bin/omastream-cli"
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/omastream/state.json"
 
@@ -105,23 +104,25 @@ BarWidget {
   }
 
   Process {
-    id: cmdProc
-    onExited: {
-      stateFile.reload()
-      if (root.service && typeof root.service.reloadState === "function") {
-        root.service.reloadState()
-      }
-    }
-  }
-
-  Process {
     id: openStudio
     command: ["xdg-open", "https://studio.youtube.com"]
   }
 
+  property real lastCmdTime: 0
+
   function runCmd(args) {
-    cmdProc.command = [omastreamBin].concat(args)
-    cmdProc.running = true
+    var now = Date.now()
+    if (args.length > 0 && args[0] !== "stop" && (now - lastCmdTime < 220)) {
+      return
+    }
+    lastCmdTime = now
+
+    if (root.service && typeof root.service.runCli === "function") {
+      root.service.runCli(args)
+      return
+    }
+    var shScript = 'if command -v omastream-cli >/dev/null 2>&1; then exec omastream-cli "$@"; elif [ -x "$HOME/.local/bin/omastream-cli" ]; then exec "$HOME/.local/bin/omastream-cli" "$@"; else exec /usr/bin/omastream-cli "$@"; fi'
+    Quickshell.execDetached(["sh", "-c", shScript, "omastream-cli"].concat(args))
   }
 
   Rectangle {
