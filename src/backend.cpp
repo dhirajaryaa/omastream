@@ -84,7 +84,7 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
         emit audioDevicesChanged();
     });
 
-    // If installed as a package (/usr/share/omastream/plugin), auto-provision user plugin directory
+    // If installed as a package (/usr/share/omastream/plugin), auto-provision user plugin directory only when changed
     const QString userPluginDir = QDir::homePath() + "/.config/omarchy/plugins/dhirajarya.omastream";
     const QString sysPluginDir = "/usr/share/omastream/plugin";
     if (QDir(sysPluginDir).exists()) {
@@ -93,15 +93,28 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
             const QString src = sysPluginDir + "/" + QLatin1String(file);
             const QString dst = userPluginDir + "/" + QLatin1String(file);
             if (QFile::exists(src)) {
-                QFile::remove(dst);
-                QFile::copy(src, dst);
+                QFile fSrc(src), fDst(dst);
+                bool needCopy = false;
+                if (!fDst.exists()) {
+                    needCopy = true;
+                } else if (fSrc.open(QIODevice::ReadOnly) && fDst.open(QIODevice::ReadOnly)) {
+                    if (fSrc.readAll() != fDst.readAll())
+                        needCopy = true;
+                    fSrc.close();
+                    fDst.close();
+                }
+                if (needCopy) {
+                    QFile::remove(dst);
+                    QFile::copy(src, dst);
+                }
             }
         }
     }
 
-    // Show camera preview overlay on launch so the streamer can preview framing & position
-    runCommand({"cam", "on"}, {});
-    m_camVisible = true;
+    if (camOnStart()) {
+        runCommand({"cam", "on"}, {});
+        m_camVisible = true;
+    }
     setAppRunningState(true);
     emit stateChanged();
 }
@@ -514,6 +527,7 @@ void Backend::togglePrivacy() {
     m_privacyActive = !m_privacyActive;
     emit stateChanged();
     runCommand({"privacy", "toggle"}, {});
+    updatePreview();
 }
 
 void Backend::setPrivacyActive(bool active) {
@@ -522,6 +536,7 @@ void Backend::setPrivacyActive(bool active) {
     m_privacyActive = active;
     emit stateChanged();
     runCommand({"privacy", active ? "on" : "off"}, {});
+    updatePreview();
 }
 
 void Backend::setPrivacyMode(const QString &mode) {
@@ -532,6 +547,7 @@ void Backend::setPrivacyMode(const QString &mode) {
     m_privacyMode = mode;
     emit stateChanged();
     runCommand({"privacy", "mode", mode}, {});
+    updatePreview();
 }
 
 void Backend::openYouTubeStudio() {
@@ -602,7 +618,8 @@ void Backend::updatePreview() {
         f.setBold(true);
         p.setFont(f);
         QString label = (m_privacyMode == "blur") ? QStringLiteral("STREAM MASKED (FROSTED BLUR)")
-                                                  : QStringLiteral("STREAM MASKED (SOLID COVER)");
+                      : (m_privacyMode == "blackout") ? QStringLiteral("STREAM MASKED (BLACKOUT)")
+                      : QStringLiteral("STREAM MASKED (STUDIO SHIELD)");
         p.drawText(img.rect(), Qt::AlignCenter, label);
         img.save(m_previewPath, "JPG", 85);
     } else {
@@ -611,6 +628,6 @@ void Backend::updatePreview() {
             QFile::remove(m_previewPath);
             QFile::rename(tmp, m_previewPath);
         }
-        QProcess::startDetached("grim", QStringList{"-s", "0.2", tmp});
+        QProcess::startDetached("grim", QStringList{"-s", "0.2", "-t", "jpeg", "-q", "75", tmp});
     }
 }

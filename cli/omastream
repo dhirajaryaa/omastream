@@ -296,7 +296,7 @@ rtmp_base() { echo "$(cfg RTMP_URL rtmp://a.rtmp.youtube.com/live2)"; }
 mask_key() { # hides the stream key in user-facing output (RTMP endpoints only)
   local out="${1:-}"
   [[ $out == rtmp://* || $out == rtmps://* ]] || { echo "$out"; return; }
-  sed -E 's#/[^/ ?&=]{4,}(/|#|$)#/<stream-key>#' <<<"$out"
+  sed -E 's@/[^/?#]+$@/<stream-key>@' <<<"$out"
 }
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$1" >> "$LOG_FILE" 2>/dev/null; }
@@ -458,12 +458,6 @@ or launch the Omastream window to configure."
   res="${res_flag:-$(cfg STREAM_RESOLUTION auto)}"
   res="$(norm_resolution "$res")"
 
-  # privacy filter plugin (native GPU frame clear / shield, zero local monitor effect)
-  local plugin_path
-  if plugin_path="$(privacy_plugin_path)"; then
-    args+=(-p "$plugin_path")
-  fi
-
   args+=(-w "$capture")
   if [[ -n $res && $res != "auto" && $res != "0x0" ]]; then
     args+=(-s "$res")
@@ -486,11 +480,13 @@ or launch the Omastream window to configure."
   screen_sharpness="$(echo "$(cfg SCREEN_SHARPNESS off)" | tr '[:upper:]' '[:lower:]')"
   case "$screen_sharpness" in
     crisp|low|1)
-      args+=(-cr full -tune quality) ;;
+      args+=(-cr full -tune quality -ffmpeg-video-opts "tune=zerolatency;bf=0") ;;
     high|medium|true|on|2)
-      args+=(-cr full -tune quality -ffmpeg-video-opts "tune=stillimage") ;;
+      args+=(-cr full -tune quality -ffmpeg-video-opts "tune=zerolatency;bf=0") ;;
     ultra|max|3)
-      args+=(-cr full -tune quality -ffmpeg-video-opts "tune=stillimage") ;;
+      args+=(-cr full -tune quality -ffmpeg-video-opts "tune=zerolatency;bf=0") ;;
+    *)
+      args+=(-ffmpeg-video-opts "tune=zerolatency;bf=0") ;;
   esac
   local extra
   extra="$(cfg EXTRA_GSR_ARGS '')"
@@ -549,6 +545,11 @@ or launch the Omastream window to configure."
     rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
     state_merge '{"streaming":false,"pid":0,"ffmpeg_pid":0}' 2>/dev/null
     die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
+  fi
+
+  # sync privacy state to gsr if already active
+  if [[ "$(state_get '.privacy.active' 'false')" == true ]]; then
+    "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
   fi
 
   local plat_str
@@ -859,18 +860,30 @@ cmd_privacy() { # cmd_privacy [on|off|toggle|mode|status] [args...]
     on|show|enable)
       nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
       state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
+      if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
+        "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
+      fi
       echo "privacy filter: on ($nxt_mode)" ;;
     off|hide|disable)
       state_merge '{"privacy":{"active":false}}'
+      if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
+        "$GSR_CLI" -ipc "$GSR_SOCK" set-paused false >/dev/null 2>&1 || true
+      fi
       echo "privacy filter: off" ;;
     toggle)
       cur="$(state_get '.privacy.active' 'false')"
       if [[ $cur == true ]]; then
         state_merge '{"privacy":{"active":false}}'
+        if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
+          "$GSR_CLI" -ipc "$GSR_SOCK" set-paused false >/dev/null 2>&1 || true
+        fi
         echo "privacy filter: off"
       else
         nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
         state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
+        if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
+          "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
+        fi
         echo "privacy filter: on ($nxt_mode)"
       fi ;;
     mode|set-mode)

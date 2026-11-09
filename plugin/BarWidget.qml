@@ -281,7 +281,7 @@ BarWidget {
         iconText: root.privacyActive ? "🔓" : "🛡️"
         accent: root.privacyActive ? "#d97706" : Color.accent
         bordered: true
-        foreground: root.privacyActive ? "white" : undefined
+        foreground: root.privacyActive ? "white" : Color.text
         horizontalPadding: Style.spacing.controlPaddingX
         verticalPadding: Style.spacing.controlPaddingY
         onClicked: {
@@ -298,7 +298,7 @@ BarWidget {
           width: (parent.width - Style.space(8)) / 3
           text: "Blur"
           bordered: true
-          accent: root.privacyMode === "blur" ? Color.accent : undefined
+          accent: root.privacyMode === "blur" ? Color.accent : "transparent"
           onClicked: {
             root.runCmd(["privacy", "mode", "blur"])
           }
@@ -308,7 +308,7 @@ BarWidget {
           width: (parent.width - Style.space(8)) / 3
           text: "Shield"
           bordered: true
-          accent: root.privacyMode === "shield" ? Color.accent : undefined
+          accent: root.privacyMode === "shield" ? Color.accent : "transparent"
           onClicked: {
             root.runCmd(["privacy", "mode", "shield"])
           }
@@ -318,7 +318,7 @@ BarWidget {
           width: (parent.width - Style.space(8)) / 3
           text: "Black"
           bordered: true
-          accent: root.privacyMode === "blackout" ? Color.accent : undefined
+          accent: root.privacyMode === "blackout" ? Color.accent : "transparent"
           onClicked: {
             root.runCmd(["privacy", "mode", "blackout"])
           }

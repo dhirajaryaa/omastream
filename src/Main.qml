@@ -1203,6 +1203,7 @@ ApplicationWindow {
                 font.family: "JetBrains Mono, monospace"
                 font.pixelSize: 10
             }
+        }
     }
 
     // ── Settings Sheet Overlay ────────────────────────────────────────────────
