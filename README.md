@@ -22,6 +22,7 @@ The app is the main surface: press **Space** to go live, press it again to stop.
 - **Live Camera Studio Overlay**: Floating webcam self-view composited onto your desktop display. Instant framing preview on launch, interactive shapes (Circle, 1:1 Square, 16:9 Wide), dynamic corner rounding slider, selfie mirror, and magnetic corner snapping.
 - **Hardware-Accelerated Capture**: Direct GPU capture via `gpu-screen-recorder` with automatic CPU fallback when GPU encoding is unsupported.
 - **Audio Routing & Text Sharpness**: Independent desktop system audio and microphone routing. Built-in screen text sharpness filters for crisp text rendering on code and terminals.
+- **Live Privacy Filter & Stream Mask**: Instantly conceal sensitive information, credentials, and API keys during live broadcasts without interrupting your stream. Three developer-focused filter presets: **Frosted Blur** (dark frosted acrylic veil over code/secrets with click-through so you can paste and configure safely), **Privacy Shield** (stream paused / be right back studio curtain), and **Blackout** (pure black screen). Controllable instantly from the app, top bar LIVE badge popup, shortcut (`P`), or CLI.
 - **Security & Privacy First**: All stream keys are kept private on your local filesystem (`chmod 600`), masked in logs and CLI outputs, and never committed or tracked. Zero telemetry.
 
 ---
@@ -175,6 +176,7 @@ The top bar remains completely normal during desktop use. While streaming:
 | --- | --- |
 | `Space` | Go live to active platforms / stop stream |
 | `C` | Show or hide the webcam bubble |
+| `P` | Toggle privacy filter overlay (blur / shield / blackout) |
 | `Escape` | Close settings overlay |
 | `Q` | Quit — prompts if a stream is running |
 
@@ -200,6 +202,9 @@ Everything the window does is fully scriptable via the CLI:
 | `omastream-cli cam flip <true\|false>` | Toggle horizontal camera mirror |
 | `omastream-cli cam save '<json>'` | Persist bubble coordinates, dimensions, and radius |
 | `omastream-cli cam status` | Output current camera visibility, shape, radius, and coordinates |
+| `omastream-cli privacy on\|off\|toggle` | Toggle privacy shield / blur overlay on desktop display |
+| `omastream-cli privacy mode <blur\|shield\|blackout>` | Select privacy filter mode (frosted blur, pause shield, blackout) |
+| `omastream-cli privacy status` | Machine-readable privacy filter state (`active`, `mode`) |
 | `omastream-cli config [stream-key\|set KEY VALUE\|open\|print]` | Manage settings in `config.env` |
 
 ---

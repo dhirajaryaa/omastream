@@ -53,6 +53,7 @@ Item {
     if (!streamService.streaming && !streamService.appRunning) {
       Quickshell.execDetached([streamService.omastreamBin, "cam", "off"])
     }
+    Quickshell.execDetached([streamService.omastreamBin, "privacy", "off"])
   }
 
   // ── runtime state snapshot (CLI is the writer) ─────────────────────────────
@@ -62,6 +63,9 @@ Item {
   readonly property bool camVisible: cam ? cam.visible === true : false
   readonly property string camShape: cam ? String(cam.shape || "16:9") : "16:9"
   readonly property real camRadius: cam && typeof cam.radius === "number" ? cam.radius : 0.20
+  readonly property var privacy: state.privacy || null
+  readonly property bool privacyActive: privacy ? privacy.active === true : false
+  readonly property string privacyMode: privacy && privacy.mode ? String(privacy.mode) : "blur"
 
   property var camConf: ({})
 
@@ -160,6 +164,27 @@ Item {
     function setRadius(radius: string): string {
       Quickshell.execDetached([streamService.omastreamBin, "cam", "radius", radius])
       return "ok"
+    }
+    function togglePrivacy(): string {
+      Quickshell.execDetached([streamService.omastreamBin, "privacy", "toggle"])
+      return "ok"
+    }
+    function setPrivacyMode(mode: string): string {
+      Quickshell.execDetached([streamService.omastreamBin, "privacy", "mode", mode])
+      return "ok"
+    }
+  }
+
+  // ── one privacy overlay per display ───────────────────────────────────────
+  Variants {
+    model: Quickshell.screens
+
+    delegate: Component {
+      PrivacyOverlay {
+        required property var modelData
+        screen: modelData
+        service: streamService
+      }
     }
   }
 

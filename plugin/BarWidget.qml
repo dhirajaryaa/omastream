@@ -21,6 +21,8 @@ BarWidget {
   property var state: ({})
   readonly property bool streaming: state.streaming === true
   readonly property bool camVisible: state && state.cam ? state.cam.visible === true : false
+  readonly property bool privacyActive: state && state.privacy ? state.privacy.active === true : false
+  readonly property string privacyMode: state && state.privacy && state.privacy.mode ? String(state.privacy.mode) : "blur"
   readonly property string mode: state && state.mode ? String(state.mode) : "stream"
 
   property string elapsed: "0:00"
@@ -128,7 +130,7 @@ BarWidget {
     width: badgeRow.implicitWidth + Style.space(10)
     height: Math.min(barSize - Style.space(8), Style.space(21))
     radius: height / 2
-    color: Color.urgent
+    color: root.privacyActive ? "#d97706" : Color.urgent
 
     Row {
       id: badgeRow
@@ -151,7 +153,7 @@ BarWidget {
       }
 
       Text {
-        text: root.mode === "file" ? "REC" : "LIVE"
+        text: root.privacyActive ? "MASKED" : (root.mode === "file" ? "REC" : "LIVE")
         textFormat: Text.PlainText
         color: "white"
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -268,6 +270,57 @@ BarWidget {
         verticalPadding: Style.spacing.controlPaddingY
         onClicked: {
           root.runCmd(["cam", "toggle"])
+        }
+      }
+
+      // ── Privacy Filter Toggle Button ─────────────────────────────────
+      Button {
+        width: parent.width
+        text: root.privacyActive ? "Disable Privacy Mask" : (root.privacyMode === "blur" ? "Blur Screen (Privacy)" : "Mask Screen (Privacy)")
+        iconText: root.privacyActive ? "🔓" : "🛡️"
+        accent: root.privacyActive ? "#d97706" : Color.accent
+        bordered: true
+        foreground: root.privacyActive ? "white" : undefined
+        horizontalPadding: Style.spacing.controlPaddingX
+        verticalPadding: Style.spacing.controlPaddingY
+        onClicked: {
+          root.runCmd(["privacy", "toggle"])
+        }
+      }
+
+      // ── Privacy Mode Quick Selectors ─────────────────────────────────
+      Row {
+        width: parent.width
+        spacing: Style.space(4)
+
+        Button {
+          width: (parent.width - Style.space(8)) / 3
+          text: "Blur"
+          bordered: true
+          accent: root.privacyMode === "blur" ? Color.accent : undefined
+          onClicked: {
+            root.runCmd(["privacy", "mode", "blur"])
+          }
+        }
+
+        Button {
+          width: (parent.width - Style.space(8)) / 3
+          text: "Shield"
+          bordered: true
+          accent: root.privacyMode === "shield" ? Color.accent : undefined
+          onClicked: {
+            root.runCmd(["privacy", "mode", "shield"])
+          }
+        }
+
+        Button {
+          width: (parent.width - Style.space(8)) / 3
+          text: "Black"
+          bordered: true
+          accent: root.privacyMode === "blackout" ? Color.accent : undefined
+          onClicked: {
+            root.runCmd(["privacy", "mode", "blackout"])
+          }
         }
       }
     }

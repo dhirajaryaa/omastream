@@ -19,6 +19,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool camVisible READ camVisible NOTIFY stateChanged)
     Q_PROPERTY(QString camShape READ camShape NOTIFY stateChanged)
     Q_PROPERTY(bool camFlip READ camFlip NOTIFY stateChanged)
+    Q_PROPERTY(bool privacyActive READ privacyActive NOTIFY stateChanged)
+    Q_PROPERTY(QString privacyMode READ privacyMode NOTIFY stateChanged)
     Q_PROPERTY(bool starting READ starting NOTIFY busyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(bool hasStreamKey READ hasStreamKey NOTIFY configChanged)
@@ -56,6 +58,8 @@ public:
     bool camVisible() const { return m_camVisible; }
     QString camShape() const { return m_camShape; }
     bool camFlip() const { return m_camFlip; }
+    bool privacyActive() const { return m_privacyActive; }
+    QString privacyMode() const { return m_privacyMode; }
     bool starting() const { return m_starting; }
     bool hasStreamKey() const { return hasAnyPlatformConfigured(); }
     bool hasAnyPlatformConfigured() const {
@@ -116,6 +120,9 @@ public:
     Q_INVOKABLE void setCamShape(const QString &shape);
     Q_INVOKABLE void setCamCorner(const QString &corner);
     Q_INVOKABLE void setCamFlip(bool flip);
+    Q_INVOKABLE void togglePrivacy();
+    Q_INVOKABLE void setPrivacyActive(bool active);
+    Q_INVOKABLE void setPrivacyMode(const QString &mode);
     Q_INVOKABLE void openYouTubeStudio();
     Q_INVOKABLE void openTwitchDashboard();
     Q_INVOKABLE void openKickDashboard();
@@ -156,6 +163,8 @@ private:
     long long m_startedAt = 0;
     QString m_elapsed, m_mode, m_output;
     bool m_camVisible = false, m_starting = false, m_camFlip = true;
+    bool m_privacyActive = false;
+    QString m_privacyMode = "blur";
     QString m_camShape = "16:9", m_stateError, m_commandError;
     QVariantMap m_config;
     QVariantList m_systemOutputs, m_microphones;

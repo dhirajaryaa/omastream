@@ -84,11 +84,14 @@ private slots:
             "{\"streaming\":true,\"pid\":42,\"startedAt\":1672400000000,"
             "\"mode\":\"stream\","
             "\"output\":\"rtmp://a.rtmp.youtube.com/live2/abcd-efgh\","
-            "\"cam\":{\"visible\":true,\"shape\":\"circle\",\"flip\":true}}";
+            "\"cam\":{\"visible\":true,\"shape\":\"circle\",\"flip\":true},"
+            "\"privacy\":{\"active\":true,\"mode\":\"blur\"}}";
         const QJsonObject state = Backend::parseJson(stateText);
         QCOMPARE(state.value("streaming").toBool(), true);
         QCOMPARE(state.value("pid").toInt(), 42);
         QCOMPARE(state.value("cam").toObject().value("shape").toString(), "circle");
+        QCOMPARE(state.value("privacy").toObject().value("active").toBool(), true);
+        QCOMPARE(state.value("privacy").toObject().value("mode").toString(), "blur");
     }
 
     void formatElapsedClocks()

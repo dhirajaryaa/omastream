@@ -97,7 +97,7 @@ say "CLI" "$HOME/.local/bin/omastream-cli"
 # ── the shell bubble plugin (optional overlay look) ──────────────────────────
 PLUGIN_DST="$HOME/.config/omarchy/plugins/dhirajarya.omastream"
 mkdir -p "$PLUGIN_DST"
-for f in manifest.json Service.qml CameraBubble.qml BarWidget.qml; do
+for f in manifest.json Service.qml CameraBubble.qml PrivacyOverlay.qml BarWidget.qml; do
   copy "$REPO/plugin/$f" "$PLUGIN_DST/$f"
 done
 if need omarchy; then

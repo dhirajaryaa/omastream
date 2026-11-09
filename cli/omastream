@@ -596,7 +596,7 @@ cmd_stop() {
     die "nothing to stop"
   fi
 
-  state_merge "{\"streaming\":false,\"pid\":0,\"ffmpeg_pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null,\"cam\":{\"visible\":false}}"
+  state_merge "{\"streaming\":false,\"pid\":0,\"ffmpeg_pid\":0,\"endedAt\":$(now_ms),\"stopRequested\":false,\"lastError\":null,\"cam\":{\"visible\":false},\"privacy\":{\"active\":false}}"
   rm -rf "$SOCK_DIR" 2>/dev/null || true
   log "stopped"
   echo "stopped"
@@ -620,7 +620,7 @@ cmd_status() {
 
   if ! gsr_pid_alive "$pid"; then
     if [[ $streaming == true ]]; then
-      state_merge '{"streaming":false,"pid":0,"cam":{"visible":false}}' 2>/dev/null
+      state_merge '{"streaming":false,"pid":0,"cam":{"visible":false},"privacy":{"active":false}}' 2>/dev/null
       streaming=false
     fi
   fi
@@ -806,6 +806,52 @@ cmd_cam() { # cmd_cam <sub> [args…]
   esac
 }
 
+# ── privacy filter commands ────────────────────────────────────────────────
+norm_privacy_mode() {
+  case "$(echo "${1:-blur}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+    blur|glass|frosted) echo "blur" ;;
+    shield|brb|pause|paused) echo "shield" ;;
+    blackout|black|blank) echo "blackout" ;;
+    *) echo "blur" ;;
+  esac
+}
+
+cmd_privacy() { # cmd_privacy [on|off|toggle|mode|status] [args...]
+  load_config
+  local sub="${1:-toggle}"
+  [[ $# -gt 0 ]] && shift
+  local cur cur_mode nxt_mode
+  cur_mode="$(norm_privacy_mode "$(state_get '.privacy.mode' "$(cfg DEFAULT_PRIVACY_MODE blur)")")"
+  case "$sub" in
+    on|show|enable)
+      nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
+      state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
+      echo "privacy filter: on ($nxt_mode)" ;;
+    off|hide|disable)
+      state_merge '{"privacy":{"active":false}}'
+      echo "privacy filter: off" ;;
+    toggle)
+      cur="$(state_get '.privacy.active' 'false')"
+      if [[ $cur == true ]]; then
+        state_merge '{"privacy":{"active":false}}'
+        echo "privacy filter: off"
+      else
+        nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
+        state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
+        echo "privacy filter: on ($nxt_mode)"
+      fi ;;
+    mode|set-mode)
+      [[ -n ${1:-} ]] || die "privacy mode <blur|shield|blackout>"
+      nxt_mode="$(norm_privacy_mode "$1")"
+      state_merge "{\"privacy\":{\"mode\":\"$nxt_mode\"}}"
+      echo "privacy mode: $nxt_mode" ;;
+    status)
+      state_json | jq -c '{active: (.privacy.active // false), mode: (.privacy.mode // "blur")}' ;;
+    *)
+      die "unknown privacy command: '$sub' — on|off|toggle|mode|status" ;;
+  esac
+}
+
 # ── config file ─────────────────────────────────────────────────────────────
 create_config() {
   mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
@@ -853,6 +899,9 @@ CAM_RECORD=true        # composite the camera into the stream frame while shown
 CAM_FIT=aspect         # aspect = no distortion; shape = region follows bubble shape
 CAM_ON_START=false     # show the camera bubble whenever a stream starts
 DEFAULT_CAM_SHAPE=16:9 # circle | 1:1 | 16:9
+
+# ── privacy filter ───────────────────────────────────────────────────────────
+DEFAULT_PRIVACY_MODE=blur  # blur (frosted screen) | shield (stream paused) | blackout
 ENV
   chmod 600 "$CONFIG_FILE"
 }
@@ -886,9 +935,9 @@ cmd_config() {
       local value allowed
       key="${1:-}"; value="${2:-}"
       # app-facing settings; keep this list to what gpu-screen-recorder and multi-streaming can use
-      allowed="|STREAM_KEY|YOUTUBE_KEY|YOUTUBE_ENABLED|TWITCH_KEY|TWITCH_ENABLED|KICK_KEY|KICK_URL|KICK_ENABLED|STREAM_RESOLUTION|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|SCREEN_SHARPNESS|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|"
+      allowed="|STREAM_KEY|YOUTUBE_KEY|YOUTUBE_ENABLED|TWITCH_KEY|TWITCH_ENABLED|KICK_KEY|KICK_URL|KICK_ENABLED|STREAM_RESOLUTION|VIDEO_CODEC|VIDEO_BITRATE|FPS|AUDIO_SYSTEM|AUDIO_MIC|MIC_ENABLED|SCREEN_SHARPNESS|CAM_DEVICE|CAM_FLIP|CAM_RECORD|CAM_ON_START|DEFAULT_CAM_SHAPE|CAM_FIT|CPU_FALLBACK|DEFAULT_PRIVACY_MODE|"
       [[ $value != *[\"\'$'\n'\\]* ]] || die "invalid value for $key"
-      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY YOUTUBE_KEY YOUTUBE_ENABLED TWITCH_KEY TWITCH_ENABLED KICK_KEY KICK_URL KICK_ENABLED STREAM_RESOLUTION VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED SCREEN_SHARPNESS CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK"
+      [[ $allowed == *"|$key|"* ]] || die "unknown setting '$key' — allowed: STREAM_KEY YOUTUBE_KEY YOUTUBE_ENABLED TWITCH_KEY TWITCH_ENABLED KICK_KEY KICK_URL KICK_ENABLED STREAM_RESOLUTION VIDEO_CODEC VIDEO_BITRATE FPS AUDIO_SYSTEM AUDIO_MIC MIC_ENABLED SCREEN_SHARPNESS CAM_DEVICE CAM_FLIP CAM_RECORD CAM_ON_START DEFAULT_CAM_SHAPE CAM_FIT CPU_FALLBACK DEFAULT_PRIVACY_MODE"
       create_config
       if grep -q "^${key}=" "$CONFIG_FILE"; then
         sed -i "s#^${key}=.*#${key}='$value'#" "$CONFIG_FILE"
@@ -975,6 +1024,9 @@ omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → R
   omastream-cli cam flip [true|false]    horizontal mirror toggle
   omastream-cli cam save '<json>'        the shell bubble persists drag/resize here
   omastream-cli cam status
+  omastream-cli privacy [on|off|toggle]  toggle privacy shield overlay (masks sensitive info)
+  omastream-cli privacy mode <blur|shield|blackout>
+  omastream-cli privacy status
   omastream-cli config [stream-key|set KEY VALUE|open|print]
 
 files:
@@ -1004,6 +1056,7 @@ main() {
     status)         cmd_status "$@" ;;
     test)           cmd_test "$@" ;;
     cam)            load_config; cmd_cam "$@" ;;
+    privacy|filter) load_config; cmd_privacy "$@" ;;
     config)         cmd_config "$@" ;;
     help|-h|--help) usage ;;
     __monitor)      __monitor "${1:-}" ;;

@@ -7,11 +7,11 @@ ApplicationWindow {
     id: win
 
     width: 380
-    height: 590
+    height: 620
     minimumWidth: 380
     maximumWidth: 420
-    minimumHeight: 560
-    maximumHeight: 680
+    minimumHeight: 580
+    maximumHeight: 720
     flags: Qt.Dialog | Qt.WindowCloseButtonHint
     visible: true
     title: "omastream"
@@ -31,6 +31,7 @@ ApplicationWindow {
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: backend.toggleStream() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: backend.toggleCam() }
+    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; onActivated: backend.togglePrivacy() }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: win.close() }
     Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: if (win.settingsOpen) win.settingsOpen = false }
 
@@ -827,12 +828,170 @@ ApplicationWindow {
                     }
                 }
             }
+
+            // Card 4: Privacy Filter (Stream Shield / Blur)
+            Rectangle {
+                Layout.fillWidth: true
+                height: backend.privacyActive ? 78 : 38
+                radius: 8
+                color: backend.privacyActive ? "#1e1624" : "#1a1d2b"
+                border.width: 1
+                border.color: backend.privacyActive ? "#d97706" : "#232638"
+
+                Behavior on height {
+                    NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                }
+
+                ColumnLayout {
+                    anchors {
+                        fill: parent
+                        margins: 9
+                    }
+                    spacing: 6
+
+                    // Top row: Header & toggle
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Image {
+                            source: "qrc:/icons/shield.svg"
+                            sourceSize: Qt.size(24, 24)
+                            Layout.preferredWidth: 15
+                            Layout.preferredHeight: 15
+                            fillMode: Image.PreserveAspectFit
+                            opacity: backend.privacyActive ? 1.0 : 0.6
+                        }
+
+                        Text {
+                            text: qsTr("Privacy Filter")
+                            color: backend.privacyActive ? "#ffffff" : "#d8dae5"
+                            font.pixelSize: 12
+                            font.bold: backend.privacyActive
+                        }
+
+                        // Status indicator pill
+                        Rectangle {
+                            radius: 3
+                            implicitWidth: privacyBadgeText.implicitWidth + 8
+                            implicitHeight: 16
+                            color: backend.privacyActive ? "#33d97706" : "#202334"
+
+                            Text {
+                                id: privacyBadgeText
+                                anchors.centerIn: parent
+                                text: backend.privacyActive ? qsTr("MASKED (STREAM SAFE)") : qsTr("OFF")
+                                color: backend.privacyActive ? "#f59e0b" : "#5e6378"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Switch {
+                            id: privacySwitch
+                            checked: backend.privacyActive
+                            onToggled: backend.togglePrivacy()
+                        }
+                    }
+
+                    // Mode Presets: Blur / Shield / Blackout
+                    RowLayout {
+                        visible: backend.privacyActive
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        // Blur pill
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 24
+                            radius: 4
+                            color: backend.privacyMode === "blur" ? "#384166" : (blurMouse.containsMouse ? "#282c42" : "#202334")
+                            border.width: 1
+                            border.color: backend.privacyMode === "blur" ? "#5e81f4" : "#2c3046"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: qsTr("Frosted Blur")
+                                color: backend.privacyMode === "blur" ? "#ffffff" : "#8e93aa"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 10
+                                font.bold: backend.privacyMode === "blur"
+                            }
+
+                            MouseArea {
+                                id: blurMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.setPrivacyMode("blur")
+                            }
+                        }
+
+                        // Shield pill
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 24
+                            radius: 4
+                            color: backend.privacyMode === "shield" ? "#384166" : (shieldMouse.containsMouse ? "#282c42" : "#202334")
+                            border.width: 1
+                            border.color: backend.privacyMode === "shield" ? "#5e81f4" : "#2c3046"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: qsTr("Stream Paused")
+                                color: backend.privacyMode === "shield" ? "#ffffff" : "#8e93aa"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 10
+                                font.bold: backend.privacyMode === "shield"
+                            }
+
+                            MouseArea {
+                                id: shieldMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.setPrivacyMode("shield")
+                            }
+                        }
+
+                        // Blackout pill
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 24
+                            radius: 4
+                            color: backend.privacyMode === "blackout" ? "#384166" : (blackoutMouse.containsMouse ? "#282c42" : "#202334")
+                            border.width: 1
+                            border.color: backend.privacyMode === "blackout" ? "#5e81f4" : "#2c3046"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: qsTr("Blackout")
+                                color: backend.privacyMode === "blackout" ? "#ffffff" : "#8e93aa"
+                                font.family: "JetBrains Mono, monospace"
+                                font.pixelSize: 10
+                                font.bold: backend.privacyMode === "blackout"
+                            }
+
+                            MouseArea {
+                                id: blackoutMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.setPrivacyMode("blackout")
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Footer note
         Text {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Press Space to Go Live · C to toggle Camera")
+            text: qsTr("Space: Go Live · C: Camera · P: Privacy Filter")
             color: "#5e6378"
             font.family: "JetBrains Mono, monospace"
             font.pixelSize: 10

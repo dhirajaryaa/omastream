@@ -1,11 +1,11 @@
 pkgname=omastream
-pkgver=1.1.0
+pkgver=1.2.0
 pkgrel=1
-pkgdesc='Multi-platform live streaming studio for Omarchy & Arch Linux (YouTube, Twitch, Kick) — gpu-screen-recorder encode, zero-copy relay, camera bubble, one honest window'
+pkgdesc='Multi-platform live streaming studio for Omarchy & Arch Linux (YouTube, Twitch, Kick) — privacy filter mask, gpu-screen-recorder encode, zero-copy relay, camera bubble, one honest window'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'libpulse' 'gpu-screen-recorder')
-makedepends=('gcc' 'make')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'libpulse' 'gpu-screen-recorder' 'jq')
+makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 source=()
 sha256sums=()
 
@@ -21,4 +21,10 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/omastream.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omastream.svg"
   install -Dm644 "$startdir/omastream.desktop" "$pkgdir/usr/share/applications/omastream.desktop"
+  for s in 512x512 256x256 128x128 64x64; do
+    install -Dm644 "assets/icons/$s/apps/omastream.png" "$pkgdir/usr/share/icons/hicolor/$s/apps/omastream.png"
+  done
+  for f in manifest.json Service.qml CameraBubble.qml PrivacyOverlay.qml BarWidget.qml; do
+    install -Dm644 "plugin/$f" "$pkgdir/usr/share/omastream/plugin/$f"
+  done
 }

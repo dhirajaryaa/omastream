@@ -77,6 +77,19 @@ Backend::Backend(const QString &statePath, const QString &configPath, const QStr
         emit audioDevicesChanged();
     });
 
+    // If installed as a package (/usr/share/omastream/plugin), auto-provision user plugin directory
+    const QString userPluginDir = QDir::homePath() + "/.config/omarchy/plugins/dhirajarya.omastream";
+    const QString sysPluginDir = "/usr/share/omastream/plugin";
+    if (QDir(sysPluginDir).exists()) {
+        QDir().mkpath(userPluginDir);
+        for (const char *file : {"manifest.json", "Service.qml", "CameraBubble.qml", "PrivacyOverlay.qml", "BarWidget.qml"}) {
+            const QString dst = userPluginDir + "/" + QLatin1String(file);
+            if (!QFile::exists(dst)) {
+                QFile::copy(sysPluginDir + "/" + QLatin1String(file), dst);
+            }
+        }
+    }
+
     // Show camera preview overlay on launch so the streamer can preview framing & position
     runCommand({"cam", "on"}, {});
     m_camVisible = true;
@@ -97,6 +110,7 @@ void Backend::cleanupOnClose() {
         QProcess::execute(m_cli, QStringList{"stop"});
     }
     QProcess::execute(m_cli, QStringList{"cam", "off"});
+    QProcess::execute(m_cli, QStringList{"privacy", "off"});
 }
 
 void Backend::setAppRunningState(bool running) {
@@ -243,6 +257,7 @@ void Backend::applyState(const QJsonObject &state) {
     const QString mode = state.value("mode").toString("stream");
     const QString output = state.value("output").toString();
     const auto cam = state.value("cam").toObject();
+    const auto privacy = state.value("privacy").toObject();
 
     const bool stopped = m_streaming && !streaming;
 
@@ -257,6 +272,11 @@ void Backend::applyState(const QJsonObject &state) {
         m_camVisible = cam.value("visible").toBool();
     if (cam.contains("flip") && cam.value("flip").isBool())
         m_camFlip = cam.value("flip").toBool();
+
+    if (privacy.contains("active"))
+        m_privacyActive = privacy.value("active").toBool();
+    if (privacy.contains("mode") && !privacy.value("mode").toString().isEmpty())
+        m_privacyMode = privacy.value("mode").toString();
 
     // The recorder's watchdog speaks through state.json when it dies alone.
     const QString reason = state.value("lastError").toString();
@@ -313,6 +333,8 @@ QString Backend::statusLine() const {
         return tr("Not streaming");
     if (m_mode == "file")
         return tr("Recording test · %1").arg(m_elapsed);
+    if (m_privacyActive)
+        return tr("LIVE (%1) · %2 · PRIVACY MASKED").arg(activePlatforms(), m_elapsed);
     return tr("LIVE (%1) · %2").arg(activePlatforms(), m_elapsed);
 }
 
@@ -464,6 +486,30 @@ void Backend::setCamCorner(const QString &corner) {
 
     QJsonDocument doc(geom);
     runCommand({"cam", "save", QString::fromUtf8(doc.toJson(QJsonDocument::Compact))}, {});
+}
+
+void Backend::togglePrivacy() {
+    m_privacyActive = !m_privacyActive;
+    emit stateChanged();
+    runCommand({"privacy", "toggle"}, {});
+}
+
+void Backend::setPrivacyActive(bool active) {
+    if (m_privacyActive != active) {
+        m_privacyActive = active;
+        emit stateChanged();
+    }
+    runCommand({"privacy", active ? "on" : "off"}, {});
+}
+
+void Backend::setPrivacyMode(const QString &mode) {
+    if (mode != "blur" && mode != "shield" && mode != "blackout")
+        return;
+    if (m_privacyMode != mode) {
+        m_privacyMode = mode;
+        emit stateChanged();
+    }
+    runCommand({"privacy", "mode", mode}, {});
 }
 
 void Backend::openYouTubeStudio() {

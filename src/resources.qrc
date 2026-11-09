@@ -18,5 +18,6 @@
         <file alias="icons/folder.svg">icons/folder.svg</file>
         <file alias="icons/aspect.svg">icons/aspect.svg</file>
         <file alias="icons/monitor.svg">icons/monitor.svg</file>
+        <file alias="icons/shield.svg">icons/shield.svg</file>
     </qresource>
 </RCC>
