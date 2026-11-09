@@ -1059,7 +1059,7 @@ omastream-cli — zero-lag GPU streaming from Omarchy (gpu-screen-recorder → R
   omastream-cli cam save '<json>'        the shell bubble persists drag/resize here
   omastream-cli cam status
   omastream-cli privacy [on|off|toggle]  toggle privacy shield overlay (masks sensitive info)
-  omastream-cli privacy mode <blur|shield|blackout>
+  omastream-cli privacy mode <blur|blackout>
   omastream-cli privacy status
   omastream-cli config [stream-key|set KEY VALUE|open|print]
 

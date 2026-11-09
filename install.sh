@@ -73,6 +73,7 @@ rm -f "$HOME/.local/share/applications/omastream-stop.desktop"
 if need qmake6 && need g++ && need make; then
   "$REPO/bin/build" >/dev/null 2>&1 || { echo "app build failed — run $REPO/bin/build for the full output" >&2; exit 1; }
   copy "$REPO/build/omastream" "$HOME/.local/bin/omastream" 755
+  copy "$REPO/build/libomastream_privacy.so" "$HOME/.local/lib/omastream/libomastream_privacy.so" 755
   say "app" "$HOME/.local/bin/omastream"
 else
   echo "Build dependencies missing. Please install them first:" >&2

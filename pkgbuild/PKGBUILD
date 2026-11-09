@@ -1,5 +1,5 @@
 pkgname=omastream
-pkgver=1.2.1
+pkgver=1.2.2
 pkgrel=1
 pkgdesc='Multi-platform live streaming studio for Omarchy & Arch Linux (YouTube, Twitch, Kick) — native GPU privacy filter plugin, in-app confidence preview, camera bubble, one honest window'
 arch=('x86_64' 'aarch64')
