@@ -518,7 +518,14 @@ or launch the Omastream window to configure."
 
   # spawn GSR (direct child → the pid we track; writes directly to destination or stream.fifo)
   rm -f "$GSR_SOCK"
-  "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  local priv_lib
+  priv_lib="$(privacy_plugin_path || true)"
+  if [[ -n $priv_lib && -f $priv_lib ]]; then
+    log "using privacy library: $priv_lib"
+    LD_PRELOAD="$priv_lib" "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  else
+    "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  fi
   local pid=$!
   local started_at
   started_at="$(now_ms)"
@@ -545,11 +552,6 @@ or launch the Omastream window to configure."
     rm -f "$STATE_DIR/stream.fifo" 2>/dev/null || true
     state_merge '{"streaming":false,"pid":0,"ffmpeg_pid":0}' 2>/dev/null
     die "gpu-screen-recorder did not become ready in 20s (see $LOG_FILE)"
-  fi
-
-  # sync privacy state to gsr if already active
-  if [[ "$(state_get '.privacy.active' 'false')" == true ]]; then
-    "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
   fi
 
   local plat_str
@@ -843,10 +845,8 @@ cmd_cam() { # cmd_cam <sub> [args…]
 # ── privacy filter commands ────────────────────────────────────────────────
 norm_privacy_mode() {
   case "$(echo "${1:-blur}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
-    blur|glass|frosted) echo "blur" ;;
-    shield|brb|pause|paused) echo "shield" ;;
     blackout|black|blank) echo "blackout" ;;
-    *) echo "blur" ;;
+    blur|glass|frosted|*) echo "blur" ;;
   esac
 }
 
@@ -860,34 +860,22 @@ cmd_privacy() { # cmd_privacy [on|off|toggle|mode|status] [args...]
     on|show|enable)
       nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
       state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
-      if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
-        "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
-      fi
       echo "privacy filter: on ($nxt_mode)" ;;
     off|hide|disable)
       state_merge '{"privacy":{"active":false}}'
-      if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
-        "$GSR_CLI" -ipc "$GSR_SOCK" set-paused false >/dev/null 2>&1 || true
-      fi
       echo "privacy filter: off" ;;
     toggle)
       cur="$(state_get '.privacy.active' 'false')"
       if [[ $cur == true ]]; then
         state_merge '{"privacy":{"active":false}}'
-        if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
-          "$GSR_CLI" -ipc "$GSR_SOCK" set-paused false >/dev/null 2>&1 || true
-        fi
         echo "privacy filter: off"
       else
         nxt_mode="$(norm_privacy_mode "${1:-$cur_mode}")"
         state_merge "{\"privacy\":{\"active\":true,\"mode\":\"$nxt_mode\"}}"
-        if [[ -S $GSR_SOCK ]] && "$GSR_CLI" -ipc "$GSR_SOCK" status >/dev/null 2>&1; then
-          "$GSR_CLI" -ipc "$GSR_SOCK" set-paused true >/dev/null 2>&1 || true
-        fi
         echo "privacy filter: on ($nxt_mode)"
       fi ;;
     mode|set-mode)
-      [[ -n ${1:-} ]] || die "privacy mode <blur|shield|blackout>"
+      [[ -n ${1:-} ]] || die "privacy mode <blur|blackout>"
       nxt_mode="$(norm_privacy_mode "$1")"
       state_merge "{\"privacy\":{\"mode\":\"$nxt_mode\"}}"
       echo "privacy mode: $nxt_mode" ;;
@@ -947,7 +935,7 @@ CAM_ON_START=false     # show the camera bubble whenever a stream starts
 DEFAULT_CAM_SHAPE=16:9 # circle | 1:1 | 16:9
 
 # ── privacy filter ───────────────────────────────────────────────────────────
-DEFAULT_PRIVACY_MODE=blur  # blur (frosted screen) | shield (stream paused) | blackout
+DEFAULT_PRIVACY_MODE=blur  # blur (frosted blur) | blackout (blackout)
 ENV
   chmod 600 "$CONFIG_FILE"
 }

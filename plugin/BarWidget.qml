@@ -277,7 +277,7 @@ BarWidget {
       // ── Privacy Filter Toggle Button ─────────────────────────────────
       Button {
         width: parent.width
-        text: root.privacyActive ? "Disable Privacy Mask" : (root.privacyMode === "blur" ? "Blur Screen (Privacy)" : "Mask Screen (Privacy)")
+        text: root.privacyActive ? "Disable Privacy Mask" : (root.privacyMode === "blur" ? "Frosted Blur (Privacy)" : "Blackout (Privacy)")
         iconText: root.privacyActive ? "🔓" : "🛡️"
         accent: root.privacyActive ? "#d97706" : Color.accent
         bordered: true
@@ -295,7 +295,7 @@ BarWidget {
         spacing: Style.space(4)
 
         Button {
-          width: (parent.width - Style.space(8)) / 3
+          width: (parent.width - Style.space(4)) / 2
           text: "Blur"
           bordered: true
           accent: root.privacyMode === "blur" ? Color.accent : "transparent"
@@ -305,18 +305,8 @@ BarWidget {
         }
 
         Button {
-          width: (parent.width - Style.space(8)) / 3
-          text: "Shield"
-          bordered: true
-          accent: root.privacyMode === "shield" ? Color.accent : "transparent"
-          onClicked: {
-            root.runCmd(["privacy", "mode", "shield"])
-          }
-        }
-
-        Button {
-          width: (parent.width - Style.space(8)) / 3
-          text: "Black"
+          width: (parent.width - Style.space(4)) / 2
+          text: "Blackout"
           bordered: true
           accent: root.privacyMode === "blackout" ? Color.accent : "transparent"
           onClicked: {

@@ -180,7 +180,7 @@ The top bar remains completely normal during desktop use. While streaming:
 | --- | --- |
 | `Space` | Go live to active platforms / stop stream |
 | `C` | Show or hide the webcam bubble |
-| `P` | Toggle privacy filter overlay (blur / shield / blackout) |
+| `P` | Toggle privacy filter (frosted blur / blackout) |
 | `Escape` | Close settings overlay |
 | `Q` | Quit — prompts if a stream is running |
 
@@ -206,8 +206,8 @@ Everything the window does is fully scriptable via the CLI:
 | `omastream-cli cam flip <true\|false>` | Toggle horizontal camera mirror |
 | `omastream-cli cam save '<json>'` | Persist bubble coordinates, dimensions, and radius |
 | `omastream-cli cam status` | Output current camera visibility, shape, radius, and coordinates |
-| `omastream-cli privacy on\|off\|toggle` | Toggle privacy shield / blur overlay on desktop display |
-| `omastream-cli privacy mode <blur\|shield\|blackout>` | Select privacy filter mode (frosted blur, pause shield, blackout) |
+| `omastream-cli privacy on\|off\|toggle` | Toggle privacy filter on live broadcast |
+| `omastream-cli privacy mode <blur\|blackout>` | Select privacy filter mode (frosted blur, blackout) |
 | `omastream-cli privacy status` | Machine-readable privacy filter state (`active`, `mode`) |
 | `omastream-cli config [stream-key\|set KEY VALUE\|open\|print]` | Manage settings in `config.env` |
 

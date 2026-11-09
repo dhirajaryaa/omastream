@@ -94,6 +94,34 @@ private slots:
         QCOMPARE(state.value("privacy").toObject().value("mode").toString(), "blur");
     }
 
+    void privacyModesRestrictedToBlurAndBlackout()
+    {
+        QTemporaryDir dir;
+        const QString statePath = dir.path() + "/state.json";
+        const QString confPath = dir.path() + "/config.env";
+        write(confPath, "YOUTUBE_KEY=key123\n");
+        write(statePath, "{\"privacy\":{\"active\":false,\"mode\":\"blur\"}}\n");
+
+        Backend backend(statePath, confPath, "/bin/true");
+        QCOMPARE(backend.privacyMode(), QString("blur"));
+
+        // Valid mode: blackout
+        backend.setPrivacyMode("blackout");
+        QCOMPARE(backend.privacyMode(), QString("blackout"));
+
+        // Invalid mode: shield (must be rejected!)
+        backend.setPrivacyMode("shield");
+        QCOMPARE(backend.privacyMode(), QString("blackout"));
+
+        // Invalid mode: pause (must be rejected!)
+        backend.setPrivacyMode("pause");
+        QCOMPARE(backend.privacyMode(), QString("blackout"));
+
+        // Valid mode: blur
+        backend.setPrivacyMode("blur");
+        QCOMPARE(backend.privacyMode(), QString("blur"));
+    }
+
     void formatElapsedClocks()
     {
         QCOMPARE(Backend::formatElapsed(1000, 61000), QString("1:00"));

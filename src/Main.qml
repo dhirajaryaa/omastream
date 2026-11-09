@@ -924,8 +924,7 @@ ApplicationWindow {
                                 id: privacyBadgeText
                                 anchors.centerIn: parent
                                 text: backend.privacyActive
-                                    ? (backend.privacyMode === "shield" ? qsTr("MASKED (STREAM PAUSED)")
-                                      : (backend.privacyMode === "blackout" ? qsTr("MASKED (BLACKOUT)") : qsTr("MASKED (FROSTED BLUR)")))
+                                    ? (backend.privacyMode === "blackout" ? qsTr("MASKED (BLACKOUT)") : qsTr("MASKED (FROSTED BLUR)"))
                                     : qsTr("OFF · SCREEN VISIBLE")
                                 color: backend.privacyActive ? "#f59e0b" : "#6b7280"
                                 font.family: "JetBrains Mono, monospace"
@@ -943,7 +942,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // Mode Presets: Blur / Shield / Blackout
+                    // Mode Presets: Frosted Blur / Blackout
                     RowLayout {
                         visible: backend.privacyActive
                         Layout.fillWidth: true
@@ -973,33 +972,6 @@ ApplicationWindow {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: backend.setPrivacyMode("blur")
-                            }
-                        }
-
-                        // Shield pill
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 26
-                            radius: 4
-                            color: backend.privacyMode === "shield" ? "#384166" : (shieldMouse.containsMouse ? "#282c42" : "#1a1e30")
-                            border.width: 1
-                            border.color: backend.privacyMode === "shield" ? "#5e81f4" : "#2c3046"
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: qsTr("Stream Paused")
-                                color: backend.privacyMode === "shield" ? "#ffffff" : "#8e93aa"
-                                font.family: "JetBrains Mono, monospace"
-                                font.pixelSize: 10
-                                font.bold: backend.privacyMode === "shield"
-                            }
-
-                            MouseArea {
-                                id: shieldMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: backend.setPrivacyMode("shield")
                             }
                         }
 

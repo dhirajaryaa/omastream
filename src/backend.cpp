@@ -305,6 +305,8 @@ void Backend::applyState(const QJsonObject &state) {
     }
     if (privacy.contains("mode") && !privacy.value("mode").toString().isEmpty()) {
         QString m = privacy.value("mode").toString();
+        if (m != "blur" && m != "blackout")
+            m = "blur";
         if (m != m_privacyMode) {
             m_privacyMode = m;
             privChanged = true;
@@ -540,7 +542,7 @@ void Backend::setPrivacyActive(bool active) {
 }
 
 void Backend::setPrivacyMode(const QString &mode) {
-    if (mode != "blur" && mode != "shield" && mode != "blackout")
+    if (mode != "blur" && mode != "blackout")
         return;
     if (m_privacyMode == mode)
         return;
@@ -607,9 +609,7 @@ void Backend::updatePreview() {
 
     if (m_privacyActive) {
         QImage img(360, 202, QImage::Format_RGB32);
-        QColor bg = (m_privacyMode == "blackout") ? QColor(0, 0, 0)
-                  : (m_privacyMode == "blur")     ? QColor(16, 23, 38)
-                                                  : QColor(9, 10, 16);
+        QColor bg = (m_privacyMode == "blackout") ? QColor(0, 0, 0) : QColor(16, 23, 38);
         img.fill(bg);
         QPainter p(&img);
         p.setPen(QColor(220, 225, 240));
@@ -617,9 +617,8 @@ void Backend::updatePreview() {
         f.setPixelSize(12);
         f.setBold(true);
         p.setFont(f);
-        QString label = (m_privacyMode == "blur") ? QStringLiteral("STREAM MASKED (FROSTED BLUR)")
-                      : (m_privacyMode == "blackout") ? QStringLiteral("STREAM MASKED (BLACKOUT)")
-                      : QStringLiteral("STREAM MASKED (STUDIO SHIELD)");
+        QString label = (m_privacyMode == "blackout") ? QStringLiteral("STREAM MASKED (BLACKOUT)")
+                                                      : QStringLiteral("STREAM MASKED (FROSTED BLUR)");
         p.drawText(img.rect(), Qt::AlignCenter, label);
         img.save(m_previewPath, "JPG", 85);
     } else {
