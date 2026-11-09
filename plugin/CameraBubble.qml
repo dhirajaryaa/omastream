@@ -272,8 +272,8 @@ PanelWindow {
 
   Camera {
     id: camera
-    cameraDevice: (root.camVisible && root.canShowCamera) ? root.pickDevice() : null
-    active: root.camVisible && root.canShowCamera && !deviceBusy
+    cameraDevice: mediaDevices.defaultVideoInput
+    active: root.camVisible && root.canShowCamera && !deviceBusy && cameraDevice !== null
     property bool deviceBusy: false
     onErrorOccurred: (error, errorString) => {
       console.warn("CameraBubble camera error: " + errorString)

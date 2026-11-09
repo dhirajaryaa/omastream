@@ -320,6 +320,14 @@ cmd_start() { # cmd_start [--cam on|off] [--file PATH] [--cpu-fallback]
     esac
   done
 
+  # Clean up any stale gsr process or socket from previous crashes
+  if gsr_ours_running; then
+    pkill -u "$UID" -INT -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" 2>/dev/null || true
+    sleep 0.3
+    pkill -u "$UID" -KILL -f "^([^ ]*/)?gpu-screen-recorder .*omastream/gsr.sock" 2>/dev/null || true
+  fi
+  rm -f "$GSR_SOCK"
+
   local output mode
   local -a targets=()
   local -a target_names=()
@@ -480,6 +488,7 @@ or launch the Omastream window to configure."
   fi
 
   # spawn (direct child → the pid we track; no setsid wrapper to lose it)
+  rm -f "$GSR_SOCK"
   "$GSR_BIN" -v no "${args[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
   local pid=$!
   local started_at
